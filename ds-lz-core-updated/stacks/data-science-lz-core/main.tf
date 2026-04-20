@@ -28,6 +28,9 @@ locals {
 
   import_private_endpoints_subnet_vnet_name = try(var.private_endpoints_subnet.virtual_network_name, "") != "" ? try(var.private_endpoints_subnet.virtual_network_name, "") : local.import_spoke_vnet_name
   import_private_endpoints_subnet_rg_name   = try(var.private_endpoints_subnet.resource_group_name, "") != "" ? try(var.private_endpoints_subnet.resource_group_name, "") : local.import_spoke_vnet_rg
+
+  import_managed_devops_pool_subnet_vnet_name = try(var.managed_devops_pool_subnet.vnet_name, "")
+import_managed_devops_pool_subnet_rg_name   = try(var.managed_devops_pool_subnet.resource_group_name, "")
 }
 
 resource "terraform_data" "input_checks" {
@@ -128,6 +131,48 @@ data "azurerm_subnet" "private_endpoints" {
   resource_group_name  = local.import_private_endpoints_subnet_rg_name
 }
 
+#**********************
+data "azurerm_subnet" "managed_devops_pool" {
+  count = var.network_mode == "import" && try(var.managed_devops_pool_subnet.existing_subnet_id, "") == "" ? 1 : 0
+
+  name                 = try(var.managed_devops_pool_subnet.name, "")
+  virtual_network_name = local.import_managed_devops_pool_subnet_vnet_name
+  resource_group_name  = local.import_managed_devops_pool_subnet_rg_name
+}
+
+resource "azurerm_subnet" "managed_devops_pool" {
+  count = var.network_mode == "create" && var.managed_devops_pool_subnet.enabled ? 1 : 0
+
+  name                 = var.managed_devops_pool_subnet.name
+  resource_group_name  = local.rg_name
+  virtual_network_name = azurerm_virtual_network.spoke[0].name
+  address_prefixes     = var.managed_devops_pool_subnet.address_prefixes
+
+  delegation {
+    name = "mdp-delegation"
+
+    service_delegation {
+      name = "Microsoft.DevOpsInfrastructure/pools"
+      actions = [
+        "Microsoft.Network/virtualNetworks/subnets/join/action"
+      ]
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.managed_devops_pool_subnet.enabled == false
+        || (
+          var.managed_devops_pool_subnet.name != ""
+          && length(var.managed_devops_pool_subnet.address_prefixes) > 0
+        )
+      )
+      error_message = "When managed_devops_pool_subnet.enabled is true, managed_devops_pool_subnet.name and managed_devops_pool_subnet.address_prefixes must be set."
+    }
+  }
+}
+
 resource "azurerm_virtual_network" "spoke" {
   count               = var.network_mode == "create" ? 1 : 0
   name                = var.spoke_vnet_name
@@ -207,7 +252,7 @@ module "data_science_lz_core" {
   storage_account      = var.storage_account
   container_registry   = var.container_registry
   #=================
-  managed_devops_pool_subnet = var.managed_devops_pool_subnet
+  
   #=================
   depends_on = [terraform_data.input_checks]
 }
