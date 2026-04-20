@@ -1,0 +1,229 @@
+parameters:
+  - name: action
+    displayName: Terraform action
+    type: string
+    default: plan
+    values: [ plan, apply ]
+
+  - name: stackPath
+    displayName: Stack path
+    type: string
+    default: stacks/data-science-lz-core
+
+  - name: terraformVersion
+    displayName: Terraform version
+    type: string
+    default: 1.7.5
+
+variables:
+  # Expected in this variable group:
+  # AZURE_SERVICE_CONNECTION = <Azure RM service connection display name>
+  # TF_BACKEND_RG, TF_BACKEND_STORAGE, TF_BACKEND_CONTAINER
+  # Optional: TF_BACKEND_KEY
+  - group: DATA_SCIENCE_LZ_DEV
+
+  - name: TF_IN_AUTOMATION
+    value: "true"
+
+pool:
+  name: azure-devopsmanaged-pool
+
+stages:
+  - stage: Validate
+    displayName: Fmt + Validate
+    jobs:
+      - job: Validate
+        displayName: Validate
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - bash: |
+              set -euo pipefail
+              e- fail on error
+              u- if encountered undefined variable, fail
+              o- pipefail - if any command in a pipeline fails, the entire pipeline fails
+
+              echo "==> terraform fmt (check only)"
+              terraform fmt -check -diff -recursive
+
+              echo "==> terraform init/validate (no backend)"
+              cd "${{ parameters.stackPath }}"
+              terraform init -backend=false -input=false -no-color
+              terraform validate -no-color
+            displayName: terraform fmt + validate
+
+  - stage: Plan
+    displayName: Terraform Plan
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: Plan
+        displayName: Plan
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - bash: |
+              set -euo pipefail
+              if command -v az >/dev/null 2>&1; then
+                echo "Azure CLI already present"
+                az version
+              else
+                echo "Azure CLI not found on agent. Installing it before AzureCLI@2..."
+                curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash 
+                az version
+              fi
+            displayName: Ensure Azure CLI is installed
+
+          - task: AzureCLI@2
+            displayName: terraform init + plan
+            inputs:
+              azureSubscription: "$(AZURE_SERVICE_CONNECTION)"
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+
+                cd "${{ parameters.stackPath }}"
+
+                : "${TF_BACKEND_RG:?TF_BACKEND_RG is required}"
+                : "${TF_BACKEND_STORAGE:?TF_BACKEND_STORAGE is required}"
+                : "${TF_BACKEND_CONTAINER:?TF_BACKEND_CONTAINER is required}"
+
+                key="${TF_BACKEND_KEY:-${{ parameters.stackPath }}/terraform.tfstate}"
+                echo "Using backend key: $key"
+
+                echo "==> Working directory"
+                pwd
+                ls -la
+
+                echo "==> Clearing old init artifacts for this stack"
+                rm -rf .terraform
+
+                echo "==> terraform init (reconfigure + upgrade)"
+                terraform init -input=false -no-color -reconfigure -upgrade \
+                  -backend-config="resource_group_name=${TF_BACKEND_RG}" \
+                  -backend-config="storage_account_name=${TF_BACKEND_STORAGE}" \
+                  -backend-config="container_name=${TF_BACKEND_CONTAINER}" \
+                  -backend-config="key=${key}"
+
+                echo "==> Terraform version"
+                terraform version
+
+                echo "==> Terraform providers"
+                terraform providers
+
+                echo "==> AzureRM entry from lock file"
+                if [ -f ".terraform.lock.hcl" ]; then
+                  grep -A 20 'registry.terraform.io/hashicorp/azurerm' .terraform.lock.hcl || true
+                else
+                  echo "No .terraform.lock.hcl found after init"
+                fi
+
+                if [ ! -f "terraform.tfvars" ]; then
+                  echo "ERROR: terraform.tfvars not found in $PWD"
+                  exit 1
+                fi
+
+                echo "==> terraform validate"
+                terraform validate -no-color
+
+                echo "==> terraform plan"
+                terraform plan -no-color -var-file="terraform.tfvars" -out="$(Build.ArtifactStagingDirectory)/tfplan"
+
+                terraform show -no-color "$(Build.ArtifactStagingDirectory)/tfplan" > "$(Build.ArtifactStagingDirectory)/tfplan.txt"
+
+                if [ -f ".terraform.lock.hcl" ]; then
+                  cp .terraform.lock.hcl "$(Build.ArtifactStagingDirectory)/.terraform.lock.hcl"
+                fi
+
+          - publish: "$(Build.ArtifactStagingDirectory)"
+            artifact: tfplan
+            displayName: Publish tfplan artifact
+
+  - stage: Apply
+    displayName: Terraform Apply (Requires Approval)
+    dependsOn: Plan
+    condition: >
+      and(
+        succeeded(),
+        eq('${{ parameters.action }}', 'apply')
+      )
+    jobs:
+      - deployment: Apply
+        displayName: Apply
+        environment: data-science-lz-dev
+        pool:
+          name: azure-devopsmanaged-pool
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: TerraformInstaller@1
+                  displayName: Install Terraform
+                  inputs:
+                    terraformVersion: ${{ parameters.terraformVersion }}
+
+                - bash: |
+                    set -euo pipefail
+                    if command -v az >/dev/null 2>&1; then
+                      echo "Azure CLI already present"
+                      az version
+                    else
+                      echo "Azure CLI not found on agent. Installing it before AzureCLI@2..."
+                      curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+                      az version
+                    fi
+                  displayName: Ensure Azure CLI is installed
+
+                - download: current
+                  artifact: tfplan
+                  displayName: Download tfplan artifact
+
+                - bash: |
+                    set -euo pipefail
+                    if [ -f "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" ]; then
+                      cp "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" "${{ parameters.stackPath }}/.terraform.lock.hcl"
+                      echo "Reused .terraform.lock.hcl from plan artifact"
+                    else
+                      echo "No .terraform.lock.hcl found in plan artifact"
+                    fi
+                  displayName: Reuse lock file from plan artifact
+
+                - task: AzureCLI@2
+                  displayName: terraform init + apply (from saved plan)
+                  inputs:
+                    azureSubscription: "$(AZURE_SERVICE_CONNECTION)"
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+
+                      cd "${{ parameters.stackPath }}"
+
+                      : "${TF_BACKEND_RG:?TF_BACKEND_RG is required}"
+                      : "${TF_BACKEND_STORAGE:?TF_BACKEND_STORAGE is required}"
+                      : "${TF_BACKEND_CONTAINER:?TF_BACKEND_CONTAINER is required}"
+
+                      key="${TF_BACKEND_KEY:-${{ parameters.stackPath }}/terraform.tfstate}"
+
+                      terraform init -input=false -no-color \
+                        -backend-config="resource_group_name=${TF_BACKEND_RG}" \
+                        -backend-config="storage_account_name=${TF_BACKEND_STORAGE}" \
+                        -backend-config="container_name=${TF_BACKEND_CONTAINER}" \
+                        -backend-config="key=${key}"
+
+                      terraform apply -no-color -auto-approve "$(Pipeline.Workspace)/tfplan/tfplan"
