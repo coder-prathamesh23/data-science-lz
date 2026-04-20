@@ -68,3 +68,15 @@ shared_storage = {
   resource_id         = ""
   subresource_targets = ["blob", "dfs"]
 }
+
+image_build_compute = {
+  enabled                              = true
+  name                                 = "cc-imgbuild-dev-dslz-westus3"
+  vm_size                              = "Standard_DS3_v2"
+  vm_priority                          = "Dedicated"
+  min_node_count                       = 0
+  max_node_count                       = 1
+  scale_down_nodes_after_idle_duration = "PT15M"
+  description                          = "CPU compute cluster for AML environment image builds"
+  subnet_resource_id                   = ""
+}

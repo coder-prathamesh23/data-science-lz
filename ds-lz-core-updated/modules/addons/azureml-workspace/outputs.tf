@@ -52,3 +52,20 @@ output "shared_storage_outbound_rule_ids" {
   value       = { for k, v in azapi_resource.shared_storage_outbound_rule : k => v.id }
   description = "AML managed outbound rule IDs for the shared AML/Fabric storage account."
 }
+
+#********************
+
+output "image_build_compute_cluster_id" {
+  description = "AML compute cluster ID used for image builds."
+  value       = try(azurerm_machine_learning_compute_cluster.image_build[0].id, null)
+}
+
+output "image_build_compute_cluster_name" {
+  description = "AML compute cluster name used for image builds."
+  value       = try(azurerm_machine_learning_compute_cluster.image_build[0].name, null)
+}
+
+output "image_build_compute_cluster_principal_id" {
+  description = "Managed identity principal ID for the image build compute cluster."
+  value       = try(azurerm_machine_learning_compute_cluster.image_build[0].identity[0].principal_id, null)
+}

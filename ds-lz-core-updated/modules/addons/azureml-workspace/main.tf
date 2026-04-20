@@ -70,6 +70,18 @@ resource "terraform_data" "input_checks" {
       condition     = var.shared_storage.enabled ? var.shared_storage.resource_id != "" : true
       error_message = "shared_storage.enabled=true requires shared_storage.resource_id."
     }
+
+#********************
+    precondition {
+  condition = (
+    !var.image_build_compute.enabled
+    || (
+      var.image_build_compute.name != "" &&
+      var.image_build_compute.vm_size != ""
+    )
+  )
+  error_message = "If image_build_compute.enabled=true, then image_build_compute.name and image_build_compute.vm_size must be set."
+}
   }
 }
 
@@ -219,4 +231,45 @@ resource "azapi_resource" "shared_storage_outbound_rule" {
   }
 
   depends_on = [azurerm_machine_learning_workspace.this]
+}
+
+#****************
+
+resource "azurerm_machine_learning_compute_cluster" "image_build" {
+  count = var.image_build_compute.enabled ? 1 : 0
+
+  name                          = var.image_build_compute.name
+  location                      = var.location
+  vm_priority                   = var.image_build_compute.vm_priority
+  vm_size                       = var.image_build_compute.vm_size
+  machine_learning_workspace_id = azapi_resource.this.id
+  description                   = var.image_build_compute.description
+
+  subnet_resource_id = var.image_build_compute.subnet_resource_id != "" ? var.image_build_compute.subnet_resource_id : null
+
+  scale_settings {
+    min_node_count                       = var.image_build_compute.min_node_count
+    max_node_count                       = var.image_build_compute.max_node_count
+    scale_down_nodes_after_idle_duration = var.image_build_compute.scale_down_nodes_after_idle_duration
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+resource "azapi_update_resource" "image_build_compute" {
+  count = var.image_build_compute.enabled ? 1 : 0
+
+  type      = "Microsoft.MachineLearningServices/workspaces@2025-06-01"
+  name      = var.ml_workspace_name
+  parent_id = local.resource_group_id
+
+  body = {
+    properties = {
+      imageBuildCompute = azurerm_machine_learning_compute_cluster.image_build[0].name
+    }
+  }
+
+  depends_on = [azurerm_machine_learning_compute_cluster.image_build]
 }

@@ -142,6 +142,9 @@ module "azureml_workspace" {
   workspace_private_dns_zone_ids    = var.workspace_private_dns_zone_ids
 
   aml_primary_outbound_rules = var.aml_primary_outbound_rules
+  #***********
+  image_build_compute = var.image_build_compute
+  #***********
   
   shared_storage = {
   enabled             = var.shared_storage.enabled

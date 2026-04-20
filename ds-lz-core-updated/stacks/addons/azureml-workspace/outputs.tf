@@ -62,3 +62,20 @@ output "shared_storage_outbound_rule_ids" {
   value       = module.azureml_workspace.shared_storage_outbound_rule_ids
   description = "Managed outbound rule IDs for the shared AML/Fabric storage account."
 }
+
+#***********
+
+output "image_build_compute_cluster_id" {
+  description = "AML compute cluster ID used for image builds."
+  value       = module.azureml_workspace.image_build_compute_cluster_id
+}
+
+output "image_build_compute_cluster_name" {
+  description = "AML compute cluster name used for image builds."
+  value       = module.azureml_workspace.image_build_compute_cluster_name
+}
+
+output "image_build_compute_cluster_principal_id" {
+  description = "Managed identity principal ID for the image build compute cluster."
+  value       = module.azureml_workspace.image_build_compute_cluster_principal_id
+}

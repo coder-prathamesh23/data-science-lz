@@ -202,3 +202,32 @@ variable "shared_storage_remote_state" {
     use_azuread_auth     = true
   }
 }
+
+#*********************
+
+variable "image_build_compute" {
+  description = "Optional AML CPU compute cluster used for environment image builds when ACR is private."
+  type = object({
+    enabled                              = bool
+    name                                 = string
+    vm_size                              = string
+    vm_priority                          = optional(string, "Dedicated")
+    min_node_count                       = optional(number, 0)
+    max_node_count                       = optional(number, 1)
+    scale_down_nodes_after_idle_duration = optional(string, "PT15M")
+    description                          = optional(string, "CPU compute cluster for AML image builds")
+    subnet_resource_id                   = optional(string, "")
+  })
+
+  default = {
+    enabled                              = false
+    name                                 = ""
+    vm_size                              = ""
+    vm_priority                          = "Dedicated"
+    min_node_count                       = 0
+    max_node_count                       = 1
+    scale_down_nodes_after_idle_duration = "PT15M"
+    description                          = "CPU compute cluster for AML image builds"
+    subnet_resource_id                   = ""
+  }
+}
