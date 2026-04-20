@@ -1,9 +1,12 @@
+trigger: none
+pr: none
+
 parameters:
   - name: action
     displayName: Terraform action
     type: string
     default: plan
-    values: [ plan, apply ]
+    values: [plan, apply]
 
   - name: stackPath
     displayName: Stack path
@@ -16,19 +19,26 @@ parameters:
     default: 1.7.5
 
 variables:
-  # Expected in this variable group:
-  # AZURE_SERVICE_CONNECTION = <Azure RM service connection display name>
-  # TF_BACKEND_RG, TF_BACKEND_STORAGE, TF_BACKEND_CONTAINER
-  # Optional: TF_BACKEND_KEY
+  # Environment-specific settings.
+  # For a different environment, update the variable group plus the two values below.
   - group: DATA_SCIENCE_LZ_DEV
+
+  - name: DEPLOY_ENV
+    value: dev
+
+  - name: AZDO_ENVIRONMENT
+    value: data-science-lz-dev
 
   - name: TF_IN_AUTOMATION
     value: "true"
 
 pool:
-  name: azure-devopsmanaged-pool
+  name: azumanage-flz
 
 stages:
+  # ------------------------------
+  # 1) Fmt + Validate (always)
+  # ------------------------------
   - stage: Validate
     displayName: Fmt + Validate
     jobs:
@@ -37,6 +47,15 @@ stages:
         steps:
           - checkout: self
 
+          - bash: |
+              set -euo pipefail
+              if ! command -v unzip >/dev/null 2>&1; then
+                echo "Installing unzip..."
+                sudo apt-get update
+                sudo apt-get install -y unzip
+              fi
+            displayName: Ensure unzip is installed
+
           - task: TerraformInstaller@1
             displayName: Install Terraform
             inputs:
@@ -44,19 +63,34 @@ stages:
 
           - bash: |
               set -euo pipefail
-              e- fail on error
-              u- if encountered undefined variable, fail
-              o- pipefail - if any command in a pipeline fails, the entire pipeline fails
+              terraform version
+
+              STACK_PATH="${{ parameters.stackPath }}"
+              STACK_PATH="${STACK_PATH#/}"
+              STACK_PATH="${STACK_PATH%/}"
+
+              if [ -z "$STACK_PATH" ]; then
+                echo "ERROR: stackPath cannot be empty."
+                exit 1
+              fi
+
+              if [ ! -d "$STACK_PATH" ]; then
+                echo "ERROR: stackPath '$STACK_PATH' does not exist in the repo."
+                exit 1
+              fi
 
               echo "==> terraform fmt (check only)"
               terraform fmt -check -diff -recursive
 
               echo "==> terraform init/validate (no backend)"
-              cd "${{ parameters.stackPath }}"
+              cd "$STACK_PATH"
               terraform init -backend=false -input=false -no-color
               terraform validate -no-color
             displayName: terraform fmt + validate
 
+  # ------------------------------
+  # 2) Plan (always)
+  # ------------------------------
   - stage: Plan
     displayName: Terraform Plan
     dependsOn: Validate
@@ -67,22 +101,28 @@ stages:
         steps:
           - checkout: self
 
+          - bash: |
+              set -euo pipefail
+              if ! command -v unzip >/dev/null 2>&1; then
+                echo "Installing unzip..."
+                sudo apt-get update
+                sudo apt-get install -y unzip
+              fi
+            displayName: Ensure unzip is installed
+
+          - bash: |
+              set -euo pipefail
+              if ! command -v az >/dev/null 2>&1; then
+                echo "Azure CLI not found. Installing..."
+                curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+              fi
+              az --version
+            displayName: Ensure Azure CLI is installed
+
           - task: TerraformInstaller@1
             displayName: Install Terraform
             inputs:
               terraformVersion: ${{ parameters.terraformVersion }}
-
-          - bash: |
-              set -euo pipefail
-              if command -v az >/dev/null 2>&1; then
-                echo "Azure CLI already present"
-                az version
-              else
-                echo "Azure CLI not found on agent. Installing it before AzureCLI@2..."
-                curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash 
-                az version
-              fi
-            displayName: Ensure Azure CLI is installed
 
           - task: AzureCLI@2
             displayName: terraform init + plan
@@ -93,64 +133,81 @@ stages:
               addSpnToEnvironment: true
               inlineScript: |
                 set -euo pipefail
+                terraform version
 
-                cd "${{ parameters.stackPath }}"
-
+                : "${AZURE_SERVICE_CONNECTION:?AZURE_SERVICE_CONNECTION is required (variable group)}"
                 : "${TF_BACKEND_RG:?TF_BACKEND_RG is required}"
                 : "${TF_BACKEND_STORAGE:?TF_BACKEND_STORAGE is required}"
                 : "${TF_BACKEND_CONTAINER:?TF_BACKEND_CONTAINER is required}"
+                : "${DEPLOY_ENV:?DEPLOY_ENV is required}"
 
-                key="${TF_BACKEND_KEY:-${{ parameters.stackPath }}/terraform.tfstate}"
-                echo "Using backend key: $key"
+                STACK_PATH="${{ parameters.stackPath }}"
+                STACK_PATH="${STACK_PATH#/}"
+                STACK_PATH="${STACK_PATH%/}"
 
-                echo "==> Working directory"
-                pwd
-                ls -la
-
-                echo "==> Clearing old init artifacts for this stack"
-                rm -rf .terraform
-
-                echo "==> terraform init (reconfigure + upgrade)"
-                terraform init -input=false -no-color -reconfigure -upgrade \
-                  -backend-config="resource_group_name=${TF_BACKEND_RG}" \
-                  -backend-config="storage_account_name=${TF_BACKEND_STORAGE}" \
-                  -backend-config="container_name=${TF_BACKEND_CONTAINER}" \
-                  -backend-config="key=${key}"
-
-                echo "==> Terraform version"
-                terraform version
-
-                echo "==> Terraform providers"
-                terraform providers
-
-                echo "==> AzureRM entry from lock file"
-                if [ -f ".terraform.lock.hcl" ]; then
-                  grep -A 20 'registry.terraform.io/hashicorp/azurerm' .terraform.lock.hcl || true
-                else
-                  echo "No .terraform.lock.hcl found after init"
+                if [ -z "$STACK_PATH" ]; then
+                  echo "ERROR: stackPath cannot be empty."
+                  exit 1
                 fi
+
+                if [ ! -d "$STACK_PATH" ]; then
+                  echo "ERROR: stackPath '$STACK_PATH' does not exist in the repo."
+                  exit 1
+                fi
+
+                cd "$STACK_PATH"
 
                 if [ ! -f "terraform.tfvars" ]; then
                   echo "ERROR: terraform.tfvars not found in $PWD"
                   exit 1
                 fi
 
-                echo "==> terraform validate"
+                KEY_OVERRIDE="${TF_BACKEND_KEY:-}"
+                if [ -n "$KEY_OVERRIDE" ]; then
+                  key="$KEY_OVERRIDE"
+                else
+                  key="$DEPLOY_ENV/$STACK_PATH/terraform.tfstate"
+                fi
+                echo "Using backend key: $key"
+
+                ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                ARM_TENANT_ID="$(az account show --query tenantId -o tsv)"
+                ARM_CLIENT_ID="${servicePrincipalId:-}"
+                export ARM_SUBSCRIPTION_ID ARM_TENANT_ID ARM_CLIENT_ID
+                export ARM_USE_CLI=false
+
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                elif [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="$idToken"
+                else
+                  echo "ERROR: AzureCLI@2 did not expose servicePrincipalKey or idToken. Ensure addSpnToEnvironment: true and the service connection auth type is SPN or Workload Identity."
+                  exit 1
+                fi
+
+                terraform init -input=false -no-color \
+                  -backend-config="resource_group_name=${TF_BACKEND_RG}" \
+                  -backend-config="storage_account_name=${TF_BACKEND_STORAGE}" \
+                  -backend-config="container_name=${TF_BACKEND_CONTAINER}" \
+                  -backend-config="key=${key}" \
+                  -backend-config="use_azuread_auth=true"
+
                 terraform validate -no-color
-
-                echo "==> terraform plan"
                 terraform plan -no-color -var-file="terraform.tfvars" -out="$(Build.ArtifactStagingDirectory)/tfplan"
-
                 terraform show -no-color "$(Build.ArtifactStagingDirectory)/tfplan" > "$(Build.ArtifactStagingDirectory)/tfplan.txt"
 
                 if [ -f ".terraform.lock.hcl" ]; then
-                  cp .terraform.lock.hcl "$(Build.ArtifactStagingDirectory)/.terraform.lock.hcl"
+                  cp .terraform.lock.hcl "$(Build.ArtifactStagingDirectory)/"
                 fi
 
           - publish: "$(Build.ArtifactStagingDirectory)"
             artifact: tfplan
             displayName: Publish tfplan artifact
 
+  # --------------------------------------------------------
+  # 3) Apply (only when action=apply, requires approval)
+  # --------------------------------------------------------
   - stage: Apply
     displayName: Terraform Apply (Requires Approval)
     dependsOn: Plan
@@ -162,31 +219,28 @@ stages:
     jobs:
       - deployment: Apply
         displayName: Apply
-        environment: data-science-lz-dev
+        environment: ${{ variables.AZDO_ENVIRONMENT }}
         pool:
-          name: azure-devopsmanaged-pool
+          name: azumanage-flz
         strategy:
           runOnce:
             deploy:
               steps:
                 - checkout: self
 
+                - bash: |
+                    set -euo pipefail
+                    if ! command -v unzip >/dev/null 2>&1; then
+                      echo "Installing unzip..."
+                      sudo apt-get update
+                      sudo apt-get install -y unzip
+                    fi
+                  displayName: Ensure unzip is installed
+
                 - task: TerraformInstaller@1
                   displayName: Install Terraform
                   inputs:
                     terraformVersion: ${{ parameters.terraformVersion }}
-
-                - bash: |
-                    set -euo pipefail
-                    if command -v az >/dev/null 2>&1; then
-                      echo "Azure CLI already present"
-                      az version
-                    else
-                      echo "Azure CLI not found on agent. Installing it before AzureCLI@2..."
-                      curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-                      az version
-                    fi
-                  displayName: Ensure Azure CLI is installed
 
                 - download: current
                   artifact: tfplan
@@ -194,13 +248,12 @@ stages:
 
                 - bash: |
                     set -euo pipefail
-                    if [ -f "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" ]; then
-                      cp "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" "${{ parameters.stackPath }}/.terraform.lock.hcl"
-                      echo "Reused .terraform.lock.hcl from plan artifact"
-                    else
-                      echo "No .terraform.lock.hcl found in plan artifact"
+                    if ! command -v az >/dev/null 2>&1; then
+                      echo "Azure CLI not found. Installing..."
+                      curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
                     fi
-                  displayName: Reuse lock file from plan artifact
+                    az --version
+                  displayName: Ensure Azure CLI is installed
 
                 - task: AzureCLI@2
                   displayName: terraform init + apply (from saved plan)
@@ -211,19 +264,70 @@ stages:
                     addSpnToEnvironment: true
                     inlineScript: |
                       set -euo pipefail
+                      terraform version
 
-                      cd "${{ parameters.stackPath }}"
-
+                      : "${AZURE_SERVICE_CONNECTION:?AZURE_SERVICE_CONNECTION is required (variable group)}"
                       : "${TF_BACKEND_RG:?TF_BACKEND_RG is required}"
                       : "${TF_BACKEND_STORAGE:?TF_BACKEND_STORAGE is required}"
                       : "${TF_BACKEND_CONTAINER:?TF_BACKEND_CONTAINER is required}"
+                      : "${DEPLOY_ENV:?DEPLOY_ENV is required}"
 
-                      key="${TF_BACKEND_KEY:-${{ parameters.stackPath }}/terraform.tfstate}"
+                      STACK_PATH="${{ parameters.stackPath }}"
+                      STACK_PATH="${STACK_PATH#/}"
+                      STACK_PATH="${STACK_PATH%/}"
+
+                      if [ -z "$STACK_PATH" ]; then
+                        echo "ERROR: stackPath cannot be empty."
+                        exit 1
+                      fi
+
+                      if [ ! -d "$STACK_PATH" ]; then
+                        echo "ERROR: stackPath '$STACK_PATH' does not exist in the repo."
+                        exit 1
+                      fi
+
+                      if [ -n "${AML_WORKSPACE_RG:-}" ] && [ -n "${AML_WORKSPACE_NAME:-}" ]; then
+                        az extension add -n ml -y || az extension update -n ml
+                        az ml workspace provision-network \
+                          -g "$AML_WORKSPACE_RG" \
+                          -n "$AML_WORKSPACE_NAME"
+                      fi
+
+                      if [ -f "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" ]; then
+                        cp "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" "$STACK_PATH/.terraform.lock.hcl"
+                      fi
+
+                      cd "$STACK_PATH"
+
+                      KEY_OVERRIDE="${TF_BACKEND_KEY:-}"
+                      if [ -n "$KEY_OVERRIDE" ]; then
+                        key="$KEY_OVERRIDE"
+                      else
+                        key="$DEPLOY_ENV/$STACK_PATH/terraform.tfstate"
+                      fi
+                      echo "Using backend key: $key"
+
+                      ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      ARM_TENANT_ID="$(az account show --query tenantId -o tsv)"
+                      ARM_CLIENT_ID="${servicePrincipalId:-}"
+                      export ARM_SUBSCRIPTION_ID ARM_TENANT_ID ARM_CLIENT_ID
+                      export ARM_USE_CLI=false
+
+                      if [ -n "${servicePrincipalKey:-}" ]; then
+                        export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      elif [ -n "${idToken:-}" ]; then
+                        export ARM_USE_OIDC=true
+                        export ARM_OIDC_TOKEN="$idToken"
+                      else
+                        echo "ERROR: AzureCLI@2 did not expose servicePrincipalKey or idToken. Ensure addSpnToEnvironment: true and the service connection auth type is SPN or Workload Identity."
+                        exit 1
+                      fi
 
                       terraform init -input=false -no-color \
                         -backend-config="resource_group_name=${TF_BACKEND_RG}" \
                         -backend-config="storage_account_name=${TF_BACKEND_STORAGE}" \
                         -backend-config="container_name=${TF_BACKEND_CONTAINER}" \
-                        -backend-config="key=${key}"
+                        -backend-config="key=${key}" \
+                        -backend-config="use_azuread_auth=true"
 
                       terraform apply -no-color -auto-approve "$(Pipeline.Workspace)/tfplan/tfplan"
