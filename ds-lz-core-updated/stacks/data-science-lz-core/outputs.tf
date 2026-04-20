@@ -68,13 +68,22 @@ output "container_registry_admin_enabled" {
   description = "Whether the Container Registry has admin enabled (if enabled)."
 }
 
-output "managed_devops_pool_subnet_id" {
-  description = "Subnet ID for Azure Managed DevOps Pool."
-  value       = module.data_science_lz_core.managed_devops_pool_subnet_id
+output "storage_blob_private_endpoint_id" {
+  description = "Blob private endpoint ID for the core storage account."
+  value       = try(azurerm_private_endpoint.storage_blob[0].id, null)
 }
 
+output "storage_blob_private_endpoint_name" {
+  description = "Blob private endpoint name for the core storage account."
+  value       = try(azurerm_private_endpoint.storage_blob[0].name, null)
+}
 
-output "managed_devops_pool_subnet_id" {
-  description = "Managed DevOps Pool subnet ID."
-  value       = module.data_science_lz_core.managed_devops_pool_subnet_id
+output "storage_file_private_endpoint_id" {
+  description = "File private endpoint ID for the core storage account."
+  value       = try(azurerm_private_endpoint.storage_file[0].id, null)
+}
+
+output "storage_file_private_endpoint_name" {
+  description = "File private endpoint name for the core storage account."
+  value       = try(azurerm_private_endpoint.storage_file[0].name, null)
 }

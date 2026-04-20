@@ -135,9 +135,3 @@ variable "container_registry" {
     error_message = "When container_registry.enabled is true, container_registry.name must be 5-50 chars, alphanumeric only."
   }
 }
-######################
-variable "managed_devops_pool_subnet_id" {
-  description = "Managed DevOps Pool subnet ID from the stack networking layer."
-  type        = string
-  default     = ""
-}

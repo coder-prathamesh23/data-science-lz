@@ -103,23 +103,3 @@ resource "azurerm_key_vault" "this" {
     }
   }
 }
-
-resource "azurerm_subnet" "managed_devops_pool" {
-  count = var.managed_devops_pool_subnet.enabled && var.network_mode == "create" ? 1 : 0
-
-  name                 = var.managed_devops_pool_subnet.name
-  resource_group_name  = var.resource_group_name
-  virtual_network_name = azurerm_virtual_network.spoke[0].name
-  address_prefixes     = var.managed_devops_pool_subnet.address_prefixes
-
-  delegation {
-    name = "mdp-delegation"
-
-    service_delegation {
-      name = "Microsoft.DevOpsInfrastructure/pools"
-      actions = [
-        "Microsoft.Network/virtualNetworks/subnets/join/action"
-      ]
-    }
-  }
-}

@@ -28,9 +28,6 @@ locals {
 
   import_private_endpoints_subnet_vnet_name = try(var.private_endpoints_subnet.virtual_network_name, "") != "" ? try(var.private_endpoints_subnet.virtual_network_name, "") : local.import_spoke_vnet_name
   import_private_endpoints_subnet_rg_name   = try(var.private_endpoints_subnet.resource_group_name, "") != "" ? try(var.private_endpoints_subnet.resource_group_name, "") : local.import_spoke_vnet_rg
-
-  import_managed_devops_pool_subnet_vnet_name = try(var.managed_devops_pool_subnet.vnet_name, "")
-import_managed_devops_pool_subnet_rg_name   = try(var.managed_devops_pool_subnet.resource_group_name, "")
 }
 
 resource "terraform_data" "input_checks" {
@@ -92,45 +89,18 @@ resource "terraform_data" "input_checks" {
       condition     = var.enable_vhub_connection ? var.hub_virtual_hub_id != "" : true
       error_message = "enable_vhub_connection=true but hub_virtual_hub_id is empty."
     }
-
-        precondition {
-      condition = (
-        !var.managed_devops_pool_subnet.enabled
-        || (
-          var.network_mode == "create"
-          && var.managed_devops_pool_subnet.name != ""
-          && length(var.managed_devops_pool_subnet.address_prefixes) > 0
-        )
-        || (
-          var.network_mode == "import"
-          && try(var.managed_devops_pool_subnet.existing_subnet_id, "") != ""
-        )
-      )
-      error_message = "If managed_devops_pool_subnet.enabled=true, then for network_mode=create provide subnet name and address_prefixes, or for network_mode=import provide existing_subnet_id."
-    }
-
+###
     precondition {
   condition = (
-    !var.managed_devops_pool_subnet.enabled
+    !var.storage_account_private_endpoints.enabled
     || (
-      var.network_mode == "create"
-      && try(var.managed_devops_pool_subnet.name, "") != ""
-      && length(try(var.managed_devops_pool_subnet.address_prefixes, [])) > 0
-    )
-    || (
-      var.network_mode == "import"
-      && (
-        try(var.managed_devops_pool_subnet.id, "") != ""
-        || (
-          try(var.managed_devops_pool_subnet.name, "") != ""
-          && try(var.managed_devops_pool_subnet.vnet_name, "") != ""
-          && try(var.managed_devops_pool_subnet.resource_group_name, "") != ""
-        )
-      )
+      length(try(var.storage_account_private_endpoints.blob_private_dns_zone_ids, [])) > 0
+      && length(try(var.storage_account_private_endpoints.file_private_dns_zone_ids, [])) > 0
     )
   )
-  error_message = "If managed_devops_pool_subnet.enabled=true, then in create mode provide name and address_prefixes, or in import mode provide either id or name + vnet_name + resource_group_name."
+  error_message = "If storage_account_private_endpoints.enabled=true, then blob_private_dns_zone_ids and file_private_dns_zone_ids must be provided."
 }
+
   }
 }
 
@@ -152,48 +122,6 @@ data "azurerm_subnet" "private_endpoints" {
   name                 = try(var.private_endpoints_subnet.name, "")
   virtual_network_name = local.import_private_endpoints_subnet_vnet_name
   resource_group_name  = local.import_private_endpoints_subnet_rg_name
-}
-
-#**********************
-data "azurerm_subnet" "managed_devops_pool" {
-  count = var.network_mode == "import" && try(var.managed_devops_pool_subnet.existing_subnet_id, "") == "" ? 1 : 0
-
-  name                 = try(var.managed_devops_pool_subnet.name, "")
-  virtual_network_name = local.import_managed_devops_pool_subnet_vnet_name
-  resource_group_name  = local.import_managed_devops_pool_subnet_rg_name
-}
-
-resource "azurerm_subnet" "managed_devops_pool" {
-  count = var.network_mode == "create" && var.managed_devops_pool_subnet.enabled ? 1 : 0
-
-  name                 = var.managed_devops_pool_subnet.name
-  resource_group_name  = local.rg_name
-  virtual_network_name = azurerm_virtual_network.spoke[0].name
-  address_prefixes     = var.managed_devops_pool_subnet.address_prefixes
-
-  delegation {
-    name = "mdp-delegation"
-
-    service_delegation {
-      name = "Microsoft.DevOpsInfrastructure/pools"
-      actions = [
-        "Microsoft.Network/virtualNetworks/subnets/join/action"
-      ]
-    }
-  }
-
-  lifecycle {
-    precondition {
-      condition = (
-        var.managed_devops_pool_subnet.enabled == false
-        || (
-          var.managed_devops_pool_subnet.name != ""
-          && length(var.managed_devops_pool_subnet.address_prefixes) > 0
-        )
-      )
-      error_message = "When managed_devops_pool_subnet.enabled is true, managed_devops_pool_subnet.name and managed_devops_pool_subnet.address_prefixes must be set."
-    }
-  }
 }
 
 resource "azurerm_virtual_network" "spoke" {
@@ -252,11 +180,6 @@ locals {
     try(data.azurerm_subnet.private_endpoints[0].id, null)
   )
 
-  managed_devops_pool_subnet_id = coalesce(
-  try(azurerm_subnet.managed_devops_pool[0].id, null),
-  try(var.managed_devops_pool_subnet.id, null),
-  try(data.azurerm_subnet.managed_devops_pool[0].id, null)
-)
 }
 
 module "data_science_lz_core" {
@@ -280,9 +203,76 @@ module "data_science_lz_core" {
   application_insights = var.application_insights
   storage_account      = var.storage_account
   container_registry   = var.container_registry
-  managed_devops_pool_subnet_id = local.managed_devops_pool_subnet_id
   depends_on = [terraform_data.input_checks]
 }
+
+###
+resource "azurerm_private_endpoint" "storage_blob" {
+  count = var.storage_account_private_endpoints.enabled ? 1 : 0
+
+  name                = try(var.storage_account_private_endpoints.blob_private_endpoint_name, "") != "" ? var.storage_account_private_endpoints.blob_private_endpoint_name : "pe-${module.data_science_lz_core.storage_account_name}-blob"
+  location            = var.location
+  resource_group_name = local.rg_name
+  subnet_id           = local.private_endpoints_subnet_id
+
+  private_service_connection {
+    name                           = try(var.storage_account_private_endpoints.blob_private_endpoint_name, "") != "" ? var.storage_account_private_endpoints.blob_private_endpoint_name : "pe-${module.data_science_lz_core.storage_account_name}-blob"
+    private_connection_resource_id = module.data_science_lz_core.storage_account_id
+    is_manual_connection           = false
+    subresource_names              = ["blob"]
+  }
+
+  lifecycle {
+  precondition {
+    condition     = local.private_endpoints_subnet_id != null && local.private_endpoints_subnet_id != ""
+    error_message = "private_endpoints_subnet_id could not be resolved for the storage Blob private endpoint."
+  }
+}
+
+  private_dns_zone_group {
+    name                 = "blob-dns"
+    private_dns_zone_ids = var.storage_account_private_endpoints.blob_private_dns_zone_ids
+  }
+
+  depends_on = [
+    terraform_data.input_checks,
+    module.data_science_lz_core
+  ]
+}
+
+resource "azurerm_private_endpoint" "storage_file" {
+  count = var.storage_account_private_endpoints.enabled ? 1 : 0
+
+  name                = try(var.storage_account_private_endpoints.file_private_endpoint_name, "") != "" ? var.storage_account_private_endpoints.file_private_endpoint_name : "pe-${module.data_science_lz_core.storage_account_name}-file"
+  location            = var.location
+  resource_group_name = local.rg_name
+  subnet_id           = local.private_endpoints_subnet_id
+
+  private_service_connection {
+    name                           = try(var.storage_account_private_endpoints.file_private_endpoint_name, "") != "" ? var.storage_account_private_endpoints.file_private_endpoint_name : "pe-${module.data_science_lz_core.storage_account_name}-file"
+    private_connection_resource_id = module.data_science_lz_core.storage_account_id
+    is_manual_connection           = false
+    subresource_names              = ["file"]
+  }
+
+  lifecycle {
+  precondition {
+    condition     = local.private_endpoints_subnet_id != null && local.private_endpoints_subnet_id != ""
+    error_message = "private_endpoints_subnet_id could not be resolved for the storage File private endpoint."
+  }
+}
+
+  private_dns_zone_group {
+    name                 = "file-dns"
+    private_dns_zone_ids = var.storage_account_private_endpoints.file_private_dns_zone_ids
+  }
+
+  depends_on = [
+    terraform_data.input_checks,
+    module.data_science_lz_core
+  ]
+}
+###
 
 resource "azurerm_virtual_hub_connection" "spoke" {
   count = var.enable_vhub_connection ? 1 : 0

@@ -52,17 +52,3 @@ output "container_registry_admin_enabled" {
   value       = try(azurerm_container_registry.this[0].admin_enabled, null)
   description = "Whether the Container Registry has admin access enabled (if enabled)."
 }
-
-output "managed_devops_pool_subnet_id" {
-  description = "Subnet ID for Azure Managed DevOps Pool."
-  value = var.managed_devops_pool_subnet.enabled ? (
-    var.network_mode == "create"
-    ? azurerm_subnet.managed_devops_pool[0].id
-    : try(var.managed_devops_pool_subnet.existing_subnet_id, "")
-  ) : ""
-}
-
-output "managed_devops_pool_subnet_id" {
-  description = "Managed DevOps Pool subnet ID."
-  value       = var.managed_devops_pool_subnet_id
-}

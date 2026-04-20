@@ -77,9 +77,18 @@ key_vault = {
   public_network_access_enabled = false
 }
 
-managed_devops_pool_subnet = {
-  enabled            = true
-  name               = "snet-mdp-dev-dslz-westus3"
-  address_prefixes   = ["10.91.3.64/27"]
-  existing_subnet_id = ""
+storage_account_private_endpoints = {
+  enabled                    = true
+  blob_private_endpoint_name = "pe-stdslzdevwestus301-blob"
+  file_private_endpoint_name = "pe-stdslzdevwestus301-file"
+
+  blob_private_dns_zone_ids = [
+    # Paste the real central DNS zone ID here:
+    # "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+  ]
+
+  file_private_dns_zone_ids = [
+    # Paste the real central DNS zone ID here:
+    # "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.file.core.windows.net"
+  ]
 }

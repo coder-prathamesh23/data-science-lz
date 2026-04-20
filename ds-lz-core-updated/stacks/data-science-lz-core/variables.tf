@@ -217,42 +217,22 @@ variable "internet_security_enabled" {
   default     = true
 }
 
-variable "managed_devops_pool_subnet" {
-  description = "Dedicated subnet for Azure Managed DevOps Pool. One subnet per pool."
+###
+variable "storage_account_private_endpoints" {
+  description = "Private endpoint configuration for the core storage account."
   type = object({
-    enabled            = bool
-    name               = string
-    address_prefixes   = list(string)
-    existing_subnet_id = optional(string, "")
+    enabled                    = bool
+    blob_private_endpoint_name = optional(string, "")
+    file_private_endpoint_name = optional(string, "")
+    blob_private_dns_zone_ids  = optional(list(string), [])
+    file_private_dns_zone_ids  = optional(list(string), [])
   })
 
   default = {
-    enabled            = false
-    name               = ""
-    address_prefixes   = []
-    existing_subnet_id = ""
-  }
-}
-
-#====================
-
-variable "managed_devops_pool_subnet" {
-  description = "Managed DevOps Pool subnet configuration."
-  type = object({
-    enabled             = bool
-    id                  = optional(string, "")
-    name                = optional(string, "")
-    address_prefixes    = optional(list(string), [])
-    resource_group_name = optional(string, "")
-    vnet_name           = optional(string, "")
-  })
-
-  default = {
-    enabled             = false
-    id                  = ""
-    name                = ""
-    address_prefixes    = []
-    resource_group_name = ""
-    vnet_name           = ""
+    enabled                    = false
+    blob_private_endpoint_name = ""
+    file_private_endpoint_name = ""
+    blob_private_dns_zone_ids  = []
+    file_private_dns_zone_ids  = []
   }
 }
