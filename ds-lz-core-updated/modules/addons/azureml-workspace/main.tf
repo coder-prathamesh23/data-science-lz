@@ -1,3 +1,4 @@
+data "azurerm_client_config" "current" {}
 locals {
   workspace_private_endpoint_name = var.workspace_private_endpoint_name != "" ? var.workspace_private_endpoint_name : "pe-${var.ml_workspace_name}"
   managed_network_parent_id       = "${azurerm_machine_learning_workspace.this.id}/managedNetworks/default"
@@ -5,6 +6,10 @@ locals {
   aml_storage_rule_targets    = try(var.aml_primary_outbound_rules.enable_storage, true) ? toset(try(var.aml_primary_outbound_rules.storage_subresource_targets, ["blob"])) : toset([])
   aml_acr_rule_targets        = try(var.aml_primary_outbound_rules.enable_acr, true) ? toset(try(var.aml_primary_outbound_rules.acr_subresource_targets, ["registry"])) : toset([])
   shared_storage_rule_targets = var.shared_storage.enabled ? toset(var.shared_storage.subresource_targets) : toset([])
+  #*******
+  aml_workspace_id = "${local.resource_group_id}/providers/Microsoft.MachineLearningServices/workspaces/${var.ml_workspace_name}"
+  resource_group_id = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${var.resource_group_name}"
+  #*******
 }
 
 resource "terraform_data" "input_checks" {
@@ -242,7 +247,7 @@ resource "azurerm_machine_learning_compute_cluster" "image_build" {
   location                      = var.location
   vm_priority                   = var.image_build_compute.vm_priority
   vm_size                       = var.image_build_compute.vm_size
-  machine_learning_workspace_id = azapi_resource.this.id
+  machine_learning_workspace_id = local.aml_workspace_id
   description                   = var.image_build_compute.description
 
   subnet_resource_id = var.image_build_compute.subnet_resource_id != "" ? var.image_build_compute.subnet_resource_id : null
@@ -256,6 +261,8 @@ resource "azurerm_machine_learning_compute_cluster" "image_build" {
   identity {
     type = "SystemAssigned"
   }
+
+  depends_on = [azapi_resource.this]
 }
 
 resource "azapi_update_resource" "image_build_compute" {

@@ -27,7 +27,7 @@ data "terraform_remote_state" "shared_storage" {
 locals {
   core_outputs = var.core_remote_state.enabled ? data.terraform_remote_state.core[0].outputs : {}
 
-    resolved_shared_storage_resource_id = var.shared_storage.resource_id != "" ? var.shared_storage.resource_id : try(data.terraform_remote_state.shared_storage[0].outputs.storage_account_id, "")
+  resolved_shared_storage_resource_id = var.shared_storage.resource_id != "" ? var.shared_storage.resource_id : try(data.terraform_remote_state.shared_storage[0].outputs.storage_account_id, "")
 
   resolved_location            = var.location != "" ? var.location : try(local.core_outputs.location, "")
   resolved_resource_group_name = var.resource_group_name != "" ? var.resource_group_name : try(local.core_outputs.resource_group_name, "")
@@ -56,7 +56,7 @@ resource "terraform_data" "input_checks" {
       error_message = "ml_workspace_name must be set."
     }
 
-      precondition {
+    precondition {
       condition     = !var.shared_storage.enabled || local.resolved_shared_storage_resource_id != ""
       error_message = "shared_storage.enabled=true but shared storage resource_id could not be resolved. Provide shared_storage.resource_id directly or enable shared_storage_remote_state."
     }
@@ -145,11 +145,11 @@ module "azureml_workspace" {
   #***********
   image_build_compute = var.image_build_compute
   #***********
-  
+
   shared_storage = {
-  enabled             = var.shared_storage.enabled
-  resource_id         = local.resolved_shared_storage_resource_id
-  subresource_targets = var.shared_storage.subresource_targets
+    enabled             = var.shared_storage.enabled
+    resource_id         = local.resolved_shared_storage_resource_id
+    subresource_targets = var.shared_storage.subresource_targets
   }
 
   depends_on = [terraform_data.input_checks]
