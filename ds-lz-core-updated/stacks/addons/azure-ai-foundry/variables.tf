@@ -1,0 +1,125 @@
+variable "spoke_subscription_id" {
+  type        = string
+  description = "Subscription ID where the Foundry add-on is deployed."
+}
+
+variable "location" {
+  type        = string
+  description = "Azure region override. If empty, resolve from core remote state."
+  default     = ""
+}
+
+variable "resource_group_name" {
+  type        = string
+  description = "Resource group override. If empty, resolve from core remote state."
+  default     = ""
+}
+
+variable "tags" {
+  type        = map(string)
+  description = "Tags override. If empty, resolve from core remote state."
+  default     = {}
+}
+
+variable "core_remote_state" {
+  type = object({
+    enabled              = bool
+    resource_group_name  = string
+    storage_account_name = string
+    container_name       = string
+    key                  = string
+    use_azuread_auth     = optional(bool, true)
+  })
+
+  default = {
+    enabled              = true
+    resource_group_name  = ""
+    storage_account_name = ""
+    container_name       = ""
+    key                  = ""
+    use_azuread_auth     = true
+  }
+}
+
+variable "foundry_name" {
+  type        = string
+  description = "Azure AI Foundry resource name."
+}
+
+variable "foundry_sku_name" {
+  type        = string
+  description = "SKU for the Foundry resource."
+  default     = "S0"
+}
+
+variable "custom_subdomain_name" {
+  type        = string
+  description = "Custom subdomain name for the Foundry resource."
+}
+
+variable "project_management_enabled" {
+  type        = bool
+  description = "Whether project management is enabled on the Foundry resource."
+  default     = true
+}
+
+variable "disable_local_auth" {
+  type        = bool
+  description = "Whether local auth is disabled."
+  default     = false
+}
+
+variable "public_network_access_enabled" {
+  type        = bool
+  description = "Whether public network access is enabled."
+  default     = false
+}
+
+variable "foundry_project" {
+  description = "Optional Foundry project configuration."
+  type = object({
+    enabled      = bool
+    name         = string
+    display_name = string
+    description  = string
+    sku_name     = string
+  })
+
+  default = {
+    enabled      = false
+    name         = ""
+    display_name = ""
+    description  = ""
+    sku_name     = "S0"
+  }
+}
+
+variable "private_endpoints_subnet_id" {
+  type        = string
+  description = "Private endpoints subnet ID override."
+  default     = ""
+}
+
+variable "enable_private_endpoint" {
+  type        = bool
+  description = "Whether to create a private endpoint for the Foundry resource."
+  default     = false
+}
+
+variable "private_endpoint_name" {
+  type        = string
+  description = "Optional explicit private endpoint name."
+  default     = ""
+}
+
+variable "private_endpoint_subresource_names" {
+  type        = list(string)
+  description = "Private Link subresource names for the Foundry private endpoint."
+  default     = ["account"]
+}
+
+variable "private_dns_zone_ids" {
+  type        = list(string)
+  description = "Foundry private DNS zone IDs provided manually by Cloud Services."
+  default     = []
+}
