@@ -15,7 +15,7 @@ locals {
   resolved_location            = var.location != "" ? var.location : try(data.terraform_remote_state.core[0].outputs.location, "")
   resolved_resource_group_name = var.resource_group_name != "" ? var.resource_group_name : try(data.terraform_remote_state.core[0].outputs.resource_group_name, "")
   resolved_tags                = length(var.tags) > 0 ? var.tags : try(data.terraform_remote_state.core[0].outputs.tags, {})
-  resolved_subnet_id           = var.subnet_id != "" ? var.subnet_id : try(data.terraform_remote_state.core[0].outputs.managed_devops_pool_subnet_id, "")
+  resolved_subnet_id = var.subnet_id != "" ? var.subnet_id : try(data.terraform_remote_state.core[0].outputs.workload_subnet_id, "")
 }
 
 resource "terraform_data" "input_checks" {
@@ -35,9 +35,9 @@ resource "terraform_data" "input_checks" {
     }
 
     precondition {
-      condition     = local.resolved_subnet_id != ""
-      error_message = "subnet_id must be set directly or resolved from core remote state."
-    }
+  condition     = local.resolved_subnet_id != ""
+  error_message = "subnet_id must be set directly or resolved from core remote state workload_subnet_id."
+}
   }
 }
 

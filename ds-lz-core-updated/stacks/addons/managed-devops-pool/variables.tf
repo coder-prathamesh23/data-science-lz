@@ -23,7 +23,7 @@ variable "tags" {
 
 variable "subnet_id" {
   type        = string
-  description = "Managed DevOps Pool subnet ID override. If empty, resolve from core remote state."
+  description = "Subnet ID override for Managed DevOps Pool. If empty, resolve from core remote state."
   default     = ""
 }
 
