@@ -108,6 +108,29 @@ resource "terraform_data" "input_checks" {
       )
       error_message = "If managed_devops_pool_subnet.enabled=true, then for network_mode=create provide subnet name and address_prefixes, or for network_mode=import provide existing_subnet_id."
     }
+
+    precondition {
+  condition = (
+    !var.managed_devops_pool_subnet.enabled
+    || (
+      var.network_mode == "create"
+      && try(var.managed_devops_pool_subnet.name, "") != ""
+      && length(try(var.managed_devops_pool_subnet.address_prefixes, [])) > 0
+    )
+    || (
+      var.network_mode == "import"
+      && (
+        try(var.managed_devops_pool_subnet.id, "") != ""
+        || (
+          try(var.managed_devops_pool_subnet.name, "") != ""
+          && try(var.managed_devops_pool_subnet.vnet_name, "") != ""
+          && try(var.managed_devops_pool_subnet.resource_group_name, "") != ""
+        )
+      )
+    )
+  )
+  error_message = "If managed_devops_pool_subnet.enabled=true, then in create mode provide name and address_prefixes, or in import mode provide either id or name + vnet_name + resource_group_name."
+}
   }
 }
 
@@ -228,6 +251,12 @@ locals {
     try(var.private_endpoints_subnet.id, null),
     try(data.azurerm_subnet.private_endpoints[0].id, null)
   )
+
+  managed_devops_pool_subnet_id = coalesce(
+  try(azurerm_subnet.managed_devops_pool[0].id, null),
+  try(var.managed_devops_pool_subnet.id, null),
+  try(data.azurerm_subnet.managed_devops_pool[0].id, null)
+)
 }
 
 module "data_science_lz_core" {
@@ -251,9 +280,7 @@ module "data_science_lz_core" {
   application_insights = var.application_insights
   storage_account      = var.storage_account
   container_registry   = var.container_registry
-  #=================
-  
-  #=================
+  managed_devops_pool_subnet_id = local.managed_devops_pool_subnet_id
   depends_on = [terraform_data.input_checks]
 }
 

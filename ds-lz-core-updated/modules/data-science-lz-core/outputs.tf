@@ -61,3 +61,8 @@ output "managed_devops_pool_subnet_id" {
     : try(var.managed_devops_pool_subnet.existing_subnet_id, "")
   ) : ""
 }
+
+output "managed_devops_pool_subnet_id" {
+  description = "Managed DevOps Pool subnet ID."
+  value       = var.managed_devops_pool_subnet_id
+}
