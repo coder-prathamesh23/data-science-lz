@@ -73,9 +73,12 @@ output "managed_devops_pool_subnet_id" {
   value       = module.data_science_lz_core.managed_devops_pool_subnet_id
 }
 
-#============================
 
 output "managed_devops_pool_subnet_id" {
   description = "Subnet ID for Azure Managed DevOps Pool."
-  value       = module.data_science_lz_core.managed_devops_pool_subnet_id
+  value = var.managed_devops_pool_subnet.enabled ? (
+    var.network_mode == "create"
+    ? azurerm_subnet.managed_devops_pool[0].id
+    : try(var.managed_devops_pool_subnet.existing_subnet_id, "")
+  ) : ""
 }
