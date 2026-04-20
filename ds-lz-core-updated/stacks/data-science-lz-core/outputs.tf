@@ -72,3 +72,10 @@ output "managed_devops_pool_subnet_id" {
   description = "Subnet ID for Azure Managed DevOps Pool."
   value       = module.data_science_lz_core.managed_devops_pool_subnet_id
 }
+
+#============================
+
+output "managed_devops_pool_subnet_id" {
+  description = "Subnet ID for Azure Managed DevOps Pool."
+  value       = module.data_science_lz_core.managed_devops_pool_subnet_id
+}

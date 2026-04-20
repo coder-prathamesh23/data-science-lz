@@ -61,3 +61,31 @@ output "managed_devops_pool_subnet_id" {
     : try(var.managed_devops_pool_subnet.existing_subnet_id, "")
   ) : ""
 }
+
+#==========================
+
+output "managed_devops_pool_subnet_id" {
+  description = "Subnet ID for Azure Managed DevOps Pool."
+  value = (
+    var.managed_devops_pool_subnet.enabled == false ? "" :
+    var.network_mode == "create" ? azurerm_subnet.managed_devops_pool[0].id :
+    var.network_mode == "import" ? try(var.managed_devops_pool_subnet.existing_subnet_id, "") :
+    ""
+  )
+
+  precondition {
+    condition = (
+      var.managed_devops_pool_subnet.enabled == false
+      || (
+        var.network_mode == "create"
+        && var.managed_devops_pool_subnet.name != ""
+        && length(var.managed_devops_pool_subnet.address_prefixes) > 0
+      )
+      || (
+        var.network_mode == "import"
+        && try(var.managed_devops_pool_subnet.existing_subnet_id, "") != ""
+      )
+    )
+    error_message = "If managed_devops_pool_subnet.enabled=true, then for network_mode=create provide subnet name and address_prefixes, or for network_mode=import provide existing_subnet_id."
+  }
+}

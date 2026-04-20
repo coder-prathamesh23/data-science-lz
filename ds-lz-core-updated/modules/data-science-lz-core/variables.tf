@@ -152,3 +152,21 @@ variable "managed_devops_pool_subnet" {
     existing_subnet_id = ""
   }
 }
+#============================================
+
+variable "managed_devops_pool_subnet" {
+  description = "Dedicated subnet for Azure Managed DevOps Pool. One subnet per pool."
+  type = object({
+    enabled            = bool
+    name               = string
+    address_prefixes   = list(string)
+    existing_subnet_id = optional(string, "")
+  })
+
+  default = {
+    enabled            = false
+    name               = ""
+    address_prefixes   = []
+    existing_subnet_id = ""
+  }
+}

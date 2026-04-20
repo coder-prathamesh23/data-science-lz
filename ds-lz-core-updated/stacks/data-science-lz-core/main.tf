@@ -206,8 +206,9 @@ module "data_science_lz_core" {
   application_insights = var.application_insights
   storage_account      = var.storage_account
   container_registry   = var.container_registry
+  #=================
   managed_devops_pool_subnet = var.managed_devops_pool_subnet
-
+  #=================
   depends_on = [terraform_data.input_checks]
 }
 

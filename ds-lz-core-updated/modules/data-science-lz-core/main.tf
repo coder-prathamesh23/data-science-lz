@@ -123,3 +123,40 @@ resource "azurerm_subnet" "managed_devops_pool" {
     }
   }
 }
+
+#==================================
+
+resource "azurerm_subnet" "managed_devops_pool" {
+  count = var.managed_devops_pool_subnet.enabled && var.network_mode == "create" ? 1 : 0
+
+  name                 = var.managed_devops_pool_subnet.name
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.spoke[0].name
+  address_prefixes     = var.managed_devops_pool_subnet.address_prefixes
+
+  delegation {
+    name = "mdp-delegation"
+
+    service_delegation {
+      name = "Microsoft.DevOpsInfrastructure/pools"
+      actions = [
+        "Microsoft.Network/virtualNetworks/subnets/join/action"
+      ]
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.managed_devops_pool_subnet.enabled == false
+        || (
+          var.managed_devops_pool_subnet.enabled == true
+          && var.network_mode == "create"
+          && var.managed_devops_pool_subnet.name != ""
+          && length(var.managed_devops_pool_subnet.address_prefixes) > 0
+        )
+      )
+      error_message = "When managed_devops_pool_subnet.enabled is true in create mode, managed_devops_pool_subnet.name and managed_devops_pool_subnet.address_prefixes must be set."
+    }
+  }
+}
