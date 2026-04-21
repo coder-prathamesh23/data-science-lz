@@ -16,6 +16,7 @@ locals {
   resolved_resource_group_name = var.resource_group_name != "" ? var.resource_group_name : try(data.terraform_remote_state.core[0].outputs.resource_group_name, "")
   resolved_tags                = length(var.tags) > 0 ? var.tags : try(data.terraform_remote_state.core[0].outputs.tags, {})
   resolved_subnet_id = var.subnet_id != "" ? var.subnet_id : try(data.terraform_remote_state.core[0].outputs.workload_subnet_id, "")
+  resolved_private_endpoints_subnet_id = try(data.terraform_remote_state.core[0].outputs.private_endpoints_subnet_id, "")
 }
 
 resource "terraform_data" "input_checks" {
@@ -38,6 +39,19 @@ resource "terraform_data" "input_checks" {
   condition     = local.resolved_subnet_id != ""
   error_message = "subnet_id must be set directly or resolved from core remote state workload_subnet_id."
 }
+#**************
+precondition {
+  condition = (
+    !var.state_storage_private_endpoint.enabled
+    || (
+      length(try(var.state_storage_private_endpoint.blob_private_dns_zone_ids, [])) > 0
+      && local.resolved_private_endpoints_subnet_id != ""
+    )
+  )
+  error_message = "If state_storage_private_endpoint.enabled=true, then blob_private_dns_zone_ids must be provided and private_endpoints_subnet_id must resolve from core remote state."
+}
+#**************
+
   }
 }
 
@@ -68,6 +82,43 @@ module "managed_devops_pool" {
   static_ip_address_count         = var.static_ip_address_count
   os_logon_type                   = var.os_logon_type
   os_disk_storage_account_type    = var.os_disk_storage_account_type
-
+#*********
+  state_storage_account = var.state_storage_account
+#*********
   depends_on = [terraform_data.input_checks]
 }
+
+#****************
+resource "azurerm_private_endpoint" "state_storage_blob" {
+  count = var.state_storage_private_endpoint.enabled ? 1 : 0
+
+  name                = try(var.state_storage_private_endpoint.blob_private_endpoint_name, "") != "" ? var.state_storage_private_endpoint.blob_private_endpoint_name : "pe-${module.managed_devops_pool.state_storage_account_name}-blob"
+  location            = local.resolved_location
+  resource_group_name = local.resolved_resource_group_name
+  subnet_id           = local.resolved_private_endpoints_subnet_id
+
+  private_service_connection {
+    name                           = try(var.state_storage_private_endpoint.blob_private_endpoint_name, "") != "" ? var.state_storage_private_endpoint.blob_private_endpoint_name : "pe-${module.managed_devops_pool.state_storage_account_name}-blob"
+    private_connection_resource_id = module.managed_devops_pool.state_storage_account_id
+    is_manual_connection           = false
+    subresource_names              = ["blob"]
+  }
+
+  private_dns_zone_group {
+    name                 = "blob-dns"
+    private_dns_zone_ids = var.state_storage_private_endpoint.blob_private_dns_zone_ids
+  }
+
+  lifecycle {
+    precondition {
+      condition     = local.resolved_private_endpoints_subnet_id != ""
+      error_message = "private_endpoints_subnet_id could not be resolved for the state storage Blob private endpoint."
+    }
+  }
+
+  depends_on = [
+    terraform_data.input_checks,
+    module.managed_devops_pool
+  ]
+}
+#****************

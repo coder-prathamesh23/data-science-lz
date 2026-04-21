@@ -153,3 +153,54 @@ variable "os_disk_storage_account_type" {
   description = "OS disk storage account type."
   default     = "StandardSSD"
 }
+#*******************
+variable "state_storage_account" {
+  description = "Optional storage account for Managed DevOps Pool state files."
+  type = object({
+    enabled                              = bool
+    name                                 = string
+    account_kind                         = optional(string, "StorageV2")
+    account_tier                         = optional(string, "Standard")
+    account_replication_type             = optional(string, "ZRS")
+    is_hns_enabled                       = optional(bool, true)
+    min_tls_version                      = optional(string, "TLS1_2")
+    public_network_access_enabled        = optional(bool, false)
+    allow_nested_items_to_be_public      = optional(bool, false)
+    shared_access_key_enabled            = optional(bool, true)
+    default_to_oauth_authentication      = optional(bool, true)
+    infrastructure_encryption_enabled    = optional(bool, false)
+    cross_tenant_replication_enabled     = optional(bool, false)
+  })
+
+  default = {
+    enabled                           = false
+    name                              = ""
+    account_kind                      = "StorageV2"
+    account_tier                      = "Standard"
+    account_replication_type          = "ZRS"
+    is_hns_enabled                    = true
+    min_tls_version                   = "TLS1_2"
+    public_network_access_enabled     = false
+    allow_nested_items_to_be_public   = false
+    shared_access_key_enabled         = true
+    default_to_oauth_authentication   = true
+    infrastructure_encryption_enabled = false
+    cross_tenant_replication_enabled  = false
+  }
+}
+
+variable "state_storage_private_endpoint" {
+  description = "Blob private endpoint configuration for Managed DevOps Pool state storage account."
+  type = object({
+    enabled                    = bool
+    blob_private_endpoint_name = optional(string, "")
+    blob_private_dns_zone_ids  = optional(list(string), [])
+  })
+
+  default = {
+    enabled                    = false
+    blob_private_endpoint_name = ""
+    blob_private_dns_zone_ids  = []
+  }
+}
+#*******************

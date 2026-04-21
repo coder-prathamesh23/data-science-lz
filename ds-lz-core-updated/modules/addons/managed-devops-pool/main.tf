@@ -83,6 +83,11 @@ resource "terraform_data" "input_checks" {
       condition     = var.open_access || length(var.projects) > 0
       error_message = "If open_access=false, then at least one Azure DevOps project must be specified."
     }
+
+    precondition {
+  condition     = !var.state_storage_account.enabled || var.state_storage_account.name != ""
+  error_message = "If state_storage_account.enabled=true, then state_storage_account.name must be set."
+}
   }
 }
 
@@ -186,3 +191,28 @@ resource "azapi_resource" "managed_devops_pool" {
 
   depends_on = [azapi_resource.dev_center_project]
 }
+
+#*****************
+resource "azurerm_storage_account" "state" {
+  count = var.state_storage_account.enabled ? 1 : 0
+
+  name                              = var.state_storage_account.name
+  location                          = var.location
+  resource_group_name               = var.resource_group_name
+  account_kind                      = try(var.state_storage_account.account_kind, "StorageV2")
+  account_tier                      = try(var.state_storage_account.account_tier, "Standard")
+  account_replication_type          = try(var.state_storage_account.account_replication_type, "ZRS")
+  is_hns_enabled                    = try(var.state_storage_account.is_hns_enabled, true)
+  min_tls_version                   = try(var.state_storage_account.min_tls_version, "TLS1_2")
+  public_network_access_enabled     = try(var.state_storage_account.public_network_access_enabled, false)
+  allow_nested_items_to_be_public   = try(var.state_storage_account.allow_nested_items_to_be_public, false)
+  shared_access_key_enabled         = try(var.state_storage_account.shared_access_key_enabled, true)
+  default_to_oauth_authentication   = try(var.state_storage_account.default_to_oauth_authentication, true)
+  infrastructure_encryption_enabled = try(var.state_storage_account.infrastructure_encryption_enabled, false)
+  cross_tenant_replication_enabled  = try(var.state_storage_account.cross_tenant_replication_enabled, false)
+
+  tags = var.tags
+
+  depends_on = [terraform_data.input_checks]
+}
+#**********************

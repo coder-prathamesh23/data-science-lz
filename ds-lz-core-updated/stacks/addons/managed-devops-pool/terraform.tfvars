@@ -36,3 +36,28 @@ static_ip_address_count = 0
 
 os_logon_type                = "Service"
 os_disk_storage_account_type = "StandardSSD"
+
+state_storage_account = {
+  enabled                           = true
+  name                              = "stmdpstatedevwestus301"
+  account_kind                      = "StorageV2"
+  account_tier                      = "Standard"
+  account_replication_type          = "ZRS"
+  is_hns_enabled                    = true
+  min_tls_version                   = "TLS1_2"
+  public_network_access_enabled     = false
+  allow_nested_items_to_be_public   = false
+  shared_access_key_enabled         = true
+  default_to_oauth_authentication   = true
+  infrastructure_encryption_enabled = false
+  cross_tenant_replication_enabled  = false
+}
+
+state_storage_private_endpoint = {
+  enabled                    = true
+  blob_private_endpoint_name = "pe-stmdpstatedevwestus301-blob"
+  blob_private_dns_zone_ids = [
+    # Paste the real central DNS zone ID here:
+    # "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+  ]
+}
