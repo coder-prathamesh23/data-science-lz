@@ -74,6 +74,7 @@ image_build_compute = {
   name                                 = "cc-imgbuild-dev-dslz-westus3"
   vm_size                              = "Standard_DS3_v2"
   vm_priority                          = "Dedicated"
+  node_public_ip_enabled               = false
   min_node_count                       = 0
   max_node_count                       = 1
   scale_down_nodes_after_idle_duration = "PT15M"

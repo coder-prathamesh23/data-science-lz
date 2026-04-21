@@ -246,6 +246,7 @@ resource "azurerm_machine_learning_compute_cluster" "image_build" {
   name                          = var.image_build_compute.name
   location                      = var.location
   vm_priority                   = var.image_build_compute.vm_priority
+  node_public_ip_enabled        = var.image_build_compute.node_public_ip_enabled
   vm_size                       = var.image_build_compute.vm_size
   machine_learning_workspace_id = local.aml_workspace_id
   description                   = var.image_build_compute.description
