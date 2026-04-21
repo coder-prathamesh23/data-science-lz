@@ -87,3 +87,15 @@ output "storage_file_private_endpoint_name" {
   description = "File private endpoint name for the core storage account."
   value       = try(azurerm_private_endpoint.storage_file[0].name, null)
 }
+
+#***************
+output "shared_key_vault_private_endpoint_id" {
+  description = "Private endpoint ID for the additional shared Key Vault."
+  value       = try(azurerm_private_endpoint.shared_key_vault[0].id, null)
+}
+
+output "shared_key_vault_private_endpoint_name" {
+  description = "Private endpoint name for the additional shared Key Vault."
+  value       = try(azurerm_private_endpoint.shared_key_vault[0].name, null)
+}
+#***************

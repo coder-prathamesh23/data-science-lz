@@ -236,3 +236,43 @@ variable "storage_account_private_endpoints" {
     file_private_dns_zone_ids  = []
   }
 }
+
+#*********************************
+variable "shared_key_vault" {
+  description = "Additional shared Key Vault for non-AML application use."
+  type = object({
+    enabled                       = bool
+    name                          = string
+    sku_name                      = optional(string, "standard")
+    purge_protection_enabled      = optional(bool, true)
+    soft_delete_retention_days    = optional(number, 7)
+    public_network_access_enabled = optional(bool, false)
+    rbac_authorization_enabled    = optional(bool, true)
+  })
+
+  default = {
+    enabled                       = false
+    name                          = ""
+    sku_name                      = "standard"
+    purge_protection_enabled      = true
+    soft_delete_retention_days    = 7
+    public_network_access_enabled = false
+    rbac_authorization_enabled    = true
+  }
+}
+
+variable "shared_key_vault_private_endpoint" {
+  description = "Private endpoint configuration for the additional shared Key Vault."
+  type = object({
+    enabled               = bool
+    private_endpoint_name = optional(string, "")
+    private_dns_zone_ids  = optional(list(string), [])
+  })
+
+  default = {
+    enabled               = false
+    private_endpoint_name = ""
+    private_dns_zone_ids  = []
+  }
+}
+#*********************************

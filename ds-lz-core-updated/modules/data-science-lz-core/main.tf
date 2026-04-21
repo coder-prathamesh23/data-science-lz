@@ -103,3 +103,27 @@ resource "azurerm_key_vault" "this" {
     }
   }
 }
+#********************
+resource "azurerm_key_vault" "shared" {
+  count               = var.shared_key_vault.enabled ? 1 : 0
+  name                = var.shared_key_vault.name
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = try(var.shared_key_vault.sku_name, "standard")
+
+  purge_protection_enabled      = try(var.shared_key_vault.purge_protection_enabled, true)
+  soft_delete_retention_days    = try(var.shared_key_vault.soft_delete_retention_days, 7)
+  public_network_access_enabled = try(var.shared_key_vault.public_network_access_enabled, false)
+  rbac_authorization_enabled    = try(var.shared_key_vault.rbac_authorization_enabled, true)
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.shared_key_vault.enabled == false || (var.shared_key_vault.enabled == true && var.shared_key_vault.name != "")
+      error_message = "When shared_key_vault.enabled is true, shared_key_vault.name must be set."
+    }
+  }
+}
+#********************

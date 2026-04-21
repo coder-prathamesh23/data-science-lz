@@ -89,17 +89,29 @@ resource "terraform_data" "input_checks" {
       condition     = var.enable_vhub_connection ? var.hub_virtual_hub_id != "" : true
       error_message = "enable_vhub_connection=true but hub_virtual_hub_id is empty."
     }
-###
+    ###
     precondition {
-  condition = (
-    !var.storage_account_private_endpoints.enabled
-    || (
-      length(try(var.storage_account_private_endpoints.blob_private_dns_zone_ids, [])) > 0
-      && length(try(var.storage_account_private_endpoints.file_private_dns_zone_ids, [])) > 0
-    )
-  )
-  error_message = "If storage_account_private_endpoints.enabled=true, then blob_private_dns_zone_ids and file_private_dns_zone_ids must be provided."
-}
+      condition = (
+        !var.storage_account_private_endpoints.enabled
+        || (
+          length(try(var.storage_account_private_endpoints.blob_private_dns_zone_ids, [])) > 0
+          && length(try(var.storage_account_private_endpoints.file_private_dns_zone_ids, [])) > 0
+        )
+      )
+      error_message = "If storage_account_private_endpoints.enabled=true, then blob_private_dns_zone_ids and file_private_dns_zone_ids must be provided."
+    }
+
+    #*******************************
+    precondition {
+      condition = (
+        !var.shared_key_vault_private_endpoint.enabled
+        || (
+          length(try(var.shared_key_vault_private_endpoint.private_dns_zone_ids, [])) > 0
+        )
+      )
+      error_message = "If shared_key_vault_private_endpoint.enabled=true, then shared_key_vault_private_endpoint.private_dns_zone_ids must be provided."
+    }
+    #*******************************
 
   }
 }
@@ -203,7 +215,10 @@ module "data_science_lz_core" {
   application_insights = var.application_insights
   storage_account      = var.storage_account
   container_registry   = var.container_registry
-  depends_on = [terraform_data.input_checks]
+  depends_on           = [terraform_data.input_checks]
+  #*************
+  shared_key_vault = var.shared_key_vault
+  #*************
 }
 
 ###
@@ -223,11 +238,11 @@ resource "azurerm_private_endpoint" "storage_blob" {
   }
 
   lifecycle {
-  precondition {
-    condition     = local.private_endpoints_subnet_id != null && local.private_endpoints_subnet_id != ""
-    error_message = "private_endpoints_subnet_id could not be resolved for the storage Blob private endpoint."
+    precondition {
+      condition     = local.private_endpoints_subnet_id != null && local.private_endpoints_subnet_id != ""
+      error_message = "private_endpoints_subnet_id could not be resolved for the storage Blob private endpoint."
+    }
   }
-}
 
   private_dns_zone_group {
     name                 = "blob-dns"
@@ -256,11 +271,11 @@ resource "azurerm_private_endpoint" "storage_file" {
   }
 
   lifecycle {
-  precondition {
-    condition     = local.private_endpoints_subnet_id != null && local.private_endpoints_subnet_id != ""
-    error_message = "private_endpoints_subnet_id could not be resolved for the storage File private endpoint."
+    precondition {
+      condition     = local.private_endpoints_subnet_id != null && local.private_endpoints_subnet_id != ""
+      error_message = "private_endpoints_subnet_id could not be resolved for the storage File private endpoint."
+    }
   }
-}
 
   private_dns_zone_group {
     name                 = "file-dns"
@@ -298,3 +313,38 @@ resource "azurerm_virtual_hub_connection" "spoke" {
 
   depends_on = [terraform_data.input_checks]
 }
+
+#*****************
+resource "azurerm_private_endpoint" "shared_key_vault" {
+  count = var.shared_key_vault_private_endpoint.enabled ? 1 : 0
+
+  name                = try(var.shared_key_vault_private_endpoint.private_endpoint_name, "") != "" ? var.shared_key_vault_private_endpoint.private_endpoint_name : "pe-${module.data_science_lz_core.shared_key_vault_name}"
+  location            = var.location
+  resource_group_name = local.rg_name
+  subnet_id           = local.private_endpoints_subnet_id
+
+  private_service_connection {
+    name                           = try(var.shared_key_vault_private_endpoint.private_endpoint_name, "") != "" ? var.shared_key_vault_private_endpoint.private_endpoint_name : "pe-${module.data_science_lz_core.shared_key_vault_name}"
+    private_connection_resource_id = module.data_science_lz_core.shared_key_vault_id
+    is_manual_connection           = false
+    subresource_names              = ["vault"]
+  }
+
+  private_dns_zone_group {
+    name                 = "vault-dns"
+    private_dns_zone_ids = var.shared_key_vault_private_endpoint.private_dns_zone_ids
+  }
+
+  lifecycle {
+    precondition {
+      condition     = local.private_endpoints_subnet_id != null && local.private_endpoints_subnet_id != ""
+      error_message = "private_endpoints_subnet_id could not be resolved for the shared Key Vault private endpoint."
+    }
+  }
+
+  depends_on = [
+    terraform_data.input_checks,
+    module.data_science_lz_core
+  ]
+}
+#*****************

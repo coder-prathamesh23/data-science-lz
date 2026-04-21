@@ -92,3 +92,23 @@ storage_account_private_endpoints = {
     # "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.file.core.windows.net"
   ]
 }
+#**************
+shared_key_vault = {
+  enabled                       = true
+  name                          = "kv-app-dev-dslz-wus3"
+  sku_name                      = "standard"
+  purge_protection_enabled      = true
+  soft_delete_retention_days    = 7
+  public_network_access_enabled = false
+  rbac_authorization_enabled    = true
+}
+
+shared_key_vault_private_endpoint = {
+  enabled               = true
+  private_endpoint_name = "pe-kv-app-dev-dslz-wus3"
+  private_dns_zone_ids = [
+    # Paste the real central DNS zone ID here:
+    # "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Network/privateDnsZones/privatelink.vaultcore.azure.net"
+  ]
+}
+#**************
