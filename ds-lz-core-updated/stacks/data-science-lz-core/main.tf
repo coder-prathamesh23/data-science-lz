@@ -155,6 +155,18 @@ resource "azurerm_subnet" "workload" {
   virtual_network_name = azurerm_virtual_network.spoke[0].name
   address_prefixes     = var.workload_subnet_address_prefixes
 
+#=================================
+  delegation {
+    name = "mdp-delegation"
+
+    service_delegation {
+      name = "Microsoft.DevOpsInfrastructure/pools"
+      actions = [
+        "Microsoft.Network/virtualNetworks/subnets/join/action"
+      ]
+    }
+  }
+#=================================
   # Workload subnet should keep PE policies enabled.
   # Private endpoints must be created only in the dedicated private endpoints subnet.
   private_endpoint_network_policies = "Enabled"
