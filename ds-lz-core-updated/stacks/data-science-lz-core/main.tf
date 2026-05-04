@@ -89,7 +89,7 @@ resource "terraform_data" "input_checks" {
       condition     = var.enable_vhub_connection ? var.hub_virtual_hub_id != "" : true
       error_message = "enable_vhub_connection=true but hub_virtual_hub_id is empty."
     }
-    ###
+
     precondition {
       condition = (
         !var.storage_account_private_endpoints.enabled
@@ -101,7 +101,6 @@ resource "terraform_data" "input_checks" {
       error_message = "If storage_account_private_endpoints.enabled=true, then blob_private_dns_zone_ids and file_private_dns_zone_ids must be provided."
     }
 
-    #*******************************
     precondition {
       condition = (
         !var.shared_key_vault_private_endpoint.enabled
@@ -111,8 +110,6 @@ resource "terraform_data" "input_checks" {
       )
       error_message = "If shared_key_vault_private_endpoint.enabled=true, then shared_key_vault_private_endpoint.private_dns_zone_ids must be provided."
     }
-    #*******************************
-
   }
 }
 
@@ -155,7 +152,10 @@ resource "azurerm_subnet" "workload" {
   virtual_network_name = azurerm_virtual_network.spoke[0].name
   address_prefixes     = var.workload_subnet_address_prefixes
 
-#=================================
+  # Workload subnet should keep PE policies enabled.
+  # Private endpoints must be created only in the dedicated private endpoints subnet.
+  private_endpoint_network_policies = "Enabled"
+
   delegation {
     name = "mdp-delegation"
 
@@ -166,11 +166,8 @@ resource "azurerm_subnet" "workload" {
       ]
     }
   }
-#=================================
-  # Workload subnet should keep PE policies enabled.
-  # Private endpoints must be created only in the dedicated private endpoints subnet.
-  private_endpoint_network_policies = "Enabled"
-  depends_on                        = [terraform_data.input_checks]
+
+  depends_on = [terraform_data.input_checks]
 }
 
 resource "azurerm_subnet" "private_endpoints" {
@@ -203,7 +200,6 @@ locals {
     try(var.private_endpoints_subnet.id, null),
     try(data.azurerm_subnet.private_endpoints[0].id, null)
   )
-
 }
 
 module "data_science_lz_core" {
@@ -227,13 +223,12 @@ module "data_science_lz_core" {
   application_insights = var.application_insights
   storage_account      = var.storage_account
   container_registry   = var.container_registry
-  depends_on           = [terraform_data.input_checks]
-  #*************
+
   shared_key_vault = var.shared_key_vault
-  #*************
+
+  depends_on = [terraform_data.input_checks]
 }
 
-###
 resource "azurerm_private_endpoint" "storage_blob" {
   count = var.storage_account_private_endpoints.enabled ? 1 : 0
 
@@ -299,7 +294,6 @@ resource "azurerm_private_endpoint" "storage_file" {
     module.data_science_lz_core
   ]
 }
-###
 
 resource "azurerm_virtual_hub_connection" "spoke" {
   count = var.enable_vhub_connection ? 1 : 0
@@ -326,7 +320,6 @@ resource "azurerm_virtual_hub_connection" "spoke" {
   depends_on = [terraform_data.input_checks]
 }
 
-#*****************
 resource "azurerm_private_endpoint" "shared_key_vault" {
   count = var.shared_key_vault_private_endpoint.enabled ? 1 : 0
 
@@ -359,4 +352,3 @@ resource "azurerm_private_endpoint" "shared_key_vault" {
     module.data_science_lz_core
   ]
 }
-#*****************

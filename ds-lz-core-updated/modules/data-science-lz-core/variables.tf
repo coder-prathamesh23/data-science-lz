@@ -136,17 +136,16 @@ variable "container_registry" {
   }
 }
 
-#********************************
 variable "shared_key_vault" {
   description = "Additional shared Key Vault for non-AML application use."
   type = object({
-    enabled                      = bool
-    name                         = string
-    sku_name                     = optional(string, "standard")
-    purge_protection_enabled     = optional(bool, true)
-    soft_delete_retention_days   = optional(number, 7)
+    enabled                       = bool
+    name                          = string
+    sku_name                      = optional(string, "standard")
+    purge_protection_enabled      = optional(bool, true)
+    soft_delete_retention_days    = optional(number, 7)
     public_network_access_enabled = optional(bool, false)
-    rbac_authorization_enabled   = optional(bool, true)
+    rbac_authorization_enabled    = optional(bool, true)
   })
 
   default = {
@@ -159,4 +158,3 @@ variable "shared_key_vault" {
     rbac_authorization_enabled    = true
   }
 }
-#********************************

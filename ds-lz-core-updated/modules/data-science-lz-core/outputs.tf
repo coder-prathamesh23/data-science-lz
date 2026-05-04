@@ -52,7 +52,7 @@ output "container_registry_admin_enabled" {
   value       = try(azurerm_container_registry.this[0].admin_enabled, null)
   description = "Whether the Container Registry has admin access enabled (if enabled)."
 }
-#********************
+
 output "shared_key_vault_id" {
   description = "Additional shared Key Vault ID."
   value       = try(azurerm_key_vault.shared[0].id, null)
@@ -62,4 +62,3 @@ output "shared_key_vault_name" {
   description = "Additional shared Key Vault name."
   value       = try(azurerm_key_vault.shared[0].name, null)
 }
-#********************

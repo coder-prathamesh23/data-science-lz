@@ -40,11 +40,11 @@ resource "azurerm_application_insights" "this" {
 }
 
 resource "azurerm_storage_account" "this" {
-  count                    = var.storage_account.enabled ? 1 : 0
-  name                     = var.storage_account.name
-  location                 = var.location
-  resource_group_name      = var.resource_group_name
-  account_tier             = try(var.storage_account.account_tier, "Standard")
+  count               = var.storage_account.enabled ? 1 : 0
+  name                = var.storage_account.name
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  account_tier        = try(var.storage_account.account_tier, "Standard")
   account_replication_type = try(var.storage_account.account_replication_type, "LRS")
   min_tls_version          = try(var.storage_account.min_tls_version, "TLS1_2")
 
@@ -94,6 +94,8 @@ resource "azurerm_key_vault" "this" {
   soft_delete_retention_days    = try(var.key_vault.soft_delete_retention_days, 7)
   public_network_access_enabled = try(var.key_vault.public_network_access_enabled, false)
 
+  rbac_authorization_enabled = true
+
   tags = var.tags
 
   lifecycle {
@@ -103,7 +105,7 @@ resource "azurerm_key_vault" "this" {
     }
   }
 }
-#********************
+
 resource "azurerm_key_vault" "shared" {
   count               = var.shared_key_vault.enabled ? 1 : 0
   name                = var.shared_key_vault.name
@@ -126,4 +128,3 @@ resource "azurerm_key_vault" "shared" {
     }
   }
 }
-#********************

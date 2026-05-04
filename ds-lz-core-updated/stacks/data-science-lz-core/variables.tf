@@ -134,12 +134,12 @@ variable "key_vault" {
 variable "log_analytics" {
   description = "Optional baseline Log Analytics workspace."
   type = object({
-    enabled                    = bool
-    name                       = string
-    sku                        = optional(string, "PerGB2018")
-    retention_in_days          = optional(number, 30)
+    enabled                   = bool
+    name                      = string
+    sku                       = optional(string, "PerGB2018")
+    retention_in_days         = optional(number, 30)
     internet_ingestion_enabled = optional(bool, true)
-    internet_query_enabled     = optional(bool, true)
+    internet_query_enabled    = optional(bool, true)
   })
   default = {
     enabled = false
@@ -217,27 +217,25 @@ variable "internet_security_enabled" {
   default     = true
 }
 
-###
 variable "storage_account_private_endpoints" {
   description = "Private endpoint configuration for the core storage account."
   type = object({
-    enabled                    = bool
-    blob_private_endpoint_name = optional(string, "")
-    file_private_endpoint_name = optional(string, "")
-    blob_private_dns_zone_ids  = optional(list(string), [])
-    file_private_dns_zone_ids  = optional(list(string), [])
+    enabled                      = bool
+    blob_private_endpoint_name   = optional(string, "")
+    file_private_endpoint_name   = optional(string, "")
+    blob_private_dns_zone_ids    = optional(list(string), [])
+    file_private_dns_zone_ids    = optional(list(string), [])
   })
 
   default = {
-    enabled                    = false
-    blob_private_endpoint_name = ""
-    file_private_endpoint_name = ""
-    blob_private_dns_zone_ids  = []
-    file_private_dns_zone_ids  = []
+    enabled                      = false
+    blob_private_endpoint_name   = ""
+    file_private_endpoint_name   = ""
+    blob_private_dns_zone_ids    = []
+    file_private_dns_zone_ids    = []
   }
 }
 
-#*********************************
 variable "shared_key_vault" {
   description = "Additional shared Key Vault for non-AML application use."
   type = object({
@@ -275,4 +273,3 @@ variable "shared_key_vault_private_endpoint" {
     private_dns_zone_ids  = []
   }
 }
-#*********************************
