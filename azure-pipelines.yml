@@ -1,362 +1,273 @@
-# ==========================================
-# GENERATE IMPORT CONFIG - GRC Function App
-# ==========================================
-- stage: GenerateImportConfig
-  displayName: 'GENERATE IMPORT CONFIG - GRC Function App'
-  dependsOn: []
-  condition: eq('${{ parameters.runMode }}', 'generate-import-config')
-
-  jobs:
-  - job: generate_import_config
-    displayName: 'Generate Terraform starter config from manifest'
-    pool:
-      name: 'azure-devopsmanaged-pool'
-
-    steps:
-    - checkout: self
-
-    - template: templates/ensure-az-cli.yml
-
-    - template: templates/bootstrap-terraform.yml
-      parameters:
-        tfVersion: ${{ variables.TF_VERSION }}
-        skipIfPresent: true
-
-    # =====================================================
-    # Probe for latest successful prior run that has tfstate artifact
-    # =====================================================
-    - task: Bash@3
-      name: ProbeSeedRun
-      displayName: 'Probe for prior run containing GRC Function App tfstate artifact'
-      env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-      inputs:
-        targetType: inline
-        script: |
-          set -euo pipefail
-
-          ORG_URL="$(System.CollectionUri)"
-          PROJECT="$(System.TeamProject)"
-          DEF_ID="$(System.DefinitionId)"
-          BRANCH="$(Build.SourceBranch)"
-          ARTIFACT_NAME="$(TFSTATE_ARTIFACT_NAME)"
-          CURRENT_BUILD_ID="$(Build.BuildId)"
-
-          echo "Scanning prior successful runs on branch: $BRANCH"
-          echo "Looking for tfstate artifact: $ARTIFACT_NAME"
-          echo "Current build id: $CURRENT_BUILD_ID"
-
-          command -v jq >/dev/null 2>&1 || { echo "ERROR: jq missing on agent"; exit 1; }
-
-          BUILDS_JSON=$(curl -sS \
-            -H "Authorization: Bearer ${SYSTEM_ACCESSTOKEN}" \
-            "${ORG_URL}${PROJECT}/_apis/build/builds?definitions=${DEF_ID}&branchName=${BRANCH}&resultFilter=succeeded&queryOrder=finishTimeDescending&%24top=50&api-version=7.1-preview.7")
-
-          BUILD_IDS=$(echo "$BUILDS_JSON" | jq -r '.value[].id')
-
-          SEED_RUN_ID="none"
-
-          for BID in $BUILD_IDS; do
-            if [ "$BID" = "$CURRENT_BUILD_ID" ]; then
-              continue
-            fi
-
-            ART_JSON=$(curl -sS \
-              -H "Authorization: Bearer ${SYSTEM_ACCESSTOKEN}" \
-              "${ORG_URL}${PROJECT}/_apis/build/builds/${BID}/artifacts?api-version=7.1-preview.5")
-
-            MATCH=$(echo "$ART_JSON" | jq -r --arg N "$ARTIFACT_NAME" '.value[]?.name | select(.==$N)' | head -n1 || true)
-
-            if [ -n "$MATCH" ]; then
-              echo "Found matching tfstate artifact in run: $BID"
-              SEED_RUN_ID="$BID"
-              break
-            fi
-          done
-
-          if [ "$SEED_RUN_ID" = "none" ]; then
-            echo "ERROR: No prior successful run found with artifact: $ARTIFACT_NAME"
-            echo "We need the latest GRC Function App state before generating import config."
-            exit 1
-          fi
-
-          echo "SeedRunId: $SEED_RUN_ID"
-          echo "##vso[task.setvariable variable=SeedRunId]$SEED_RUN_ID"
-
-    # =====================================================
-    # Restore latest GRC Function App state
-    # =====================================================
-    - task: DownloadPipelineArtifact@2
-      displayName: 'Restore GRC Function App tfstate artifact'
-      inputs:
-        buildType: 'specific'
-        project: '$(System.TeamProject)'
-        definition: '$(System.DefinitionId)'
-        buildVersionToDownload: 'specific'
-        pipelineId: '$(SeedRunId)'
-        artifactName: '$(TFSTATE_ARTIFACT_NAME)'
-        targetPath: '$(System.DefaultWorkingDirectory)/$(STATE_DIR)'
-      continueOnError: false
-
-    # =====================================================
-    # Generate Terraform import config from manifest
-    # =====================================================
-    - task: AzureCLI@2
-      displayName: 'Generate Terraform starter config from manifest'
-      inputs:
-        azureSubscription: $(AZ_SC_APPLY)
-        scriptType: bash
-        scriptLocation: inlineScript
-        workingDirectory: $(System.DefaultWorkingDirectory)
-        inlineScript: |
-          set -euo pipefail
-
-          OUTDIR="$(Build.ArtifactStagingDirectory)/generate-import-config"
-          REPO_ROOT="$(System.DefaultWorkingDirectory)"
-          MANIFEST="$REPO_ROOT/reconciliation/grc-function-app-dev/import-manifest.csv"
-          GENERATED_FILE="generated_grc_function_app_import.tf"
-
-          mkdir -p "$OUTDIR"
-
-          command -v az >/dev/null 2>&1 || { echo "ERROR: AZ CLI missing"; exit 1; }
-          command -v terraform >/dev/null 2>&1 || { echo "ERROR: Terraform missing"; exit 1; }
-
-          export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
-          export ARM_TENANT_ID="$(az account show --query tenantId -o tsv)"
-          export ARM_USE_OIDC=true
-          export ARM_CLIENT_ID="$(az account show --query user.name -o tsv)"
-          export TF_IN_AUTOMATION=1
-
-          echo "Azure account context:"
-          az account show -o table | tee "$OUTDIR/az_account_context.txt"
-
-          echo "Manifest path:"
-          echo "$MANIFEST"
-
-          if [ ! -f "$MANIFEST" ]; then
-            echo "ERROR: Manifest not found: $MANIFEST"
-            find "$REPO_ROOT" -name "import-manifest*.csv" -type f -print
-            exit 1
-          fi
-
-          echo "Manifest content:"
-          nl -ba "$MANIFEST" | tee "$OUTDIR/manifest_content.txt"
-
-          if [ ! -d "$(TF_DIR)" ]; then
-            echo "ERROR: Terraform folder not found: $(TF_DIR)"
-            exit 1
-          fi
-
-          if ! find "$(TF_DIR)" -maxdepth 1 -type f -name '*.tf' | grep -q .; then
-            echo "ERROR: No Terraform files found in $(TF_DIR)"
-            exit 1
-          fi
-
-          if [ ! -f "$(System.DefaultWorkingDirectory)/$(STATE_DIR)/terraform.tfstate" ]; then
-            echo "ERROR: terraform.tfstate was not restored into $(STATE_DIR)"
-            echo "State directory contents:"
-            ls -la "$(System.DefaultWorkingDirectory)/$(STATE_DIR)" || true
-            exit 1
-          fi
-
-          echo "Restoring latest state into Terraform working directory"
-          cp "$(System.DefaultWorkingDirectory)/$(STATE_DIR)/terraform.tfstate" "$(TF_DIR)/terraform.tfstate"
-
-          if [ -f "$(System.DefaultWorkingDirectory)/$(STATE_DIR)/terraform.tfstate.backup" ]; then
-            cp "$(System.DefaultWorkingDirectory)/$(STATE_DIR)/terraform.tfstate.backup" "$(TF_DIR)/terraform.tfstate.backup"
-          fi
-
-          cd "$(TF_DIR)"
-
-          echo "Terraform working directory:"
-          pwd | tee "$OUTDIR/current_directory.txt"
-
-          echo "Terraform directory before init:"
-          ls -la | tee "$OUTDIR/tf_dir_listing_before_init.txt"
-
-          # Disable backend blocks for local-state reconciliation
-          mkdir -p .backend_disabled
-          for f in $(grep -rl 'backend *"azurerm"' . || true); do
-            mv "$f" ".backend_disabled/$(basename "$f")"
-          done
-
-          echo "Running terraform init"
-          terraform init -backend=false -input=false 2>&1 | tee "$OUTDIR/terraform_init.txt"
-
-          echo "Exporting Terraform variables needed by current GRC Function App config"
-
-          # Existing App Service Plan
-          export TF_VAR_plan_name="ASP-rgsubpailz-917e"
-          export TF_VAR_plan_resource_group_name="rg-sub-p-ailz"
-
-          # Existing Function App
-          export TF_VAR_function_resource_group_name="rg-sub-p-ailz"
-          export TF_VAR_location="westus3"
-          export TF_VAR_function_app_name="pse-grc-function"
-          export TF_VAR_python_version="3.12"
-          export TF_VAR_functions_extension_version="~4"
-          export TF_VAR_bootstrap_storage_account_name="psegrcfunctionstorage"
-          export TF_VAR_vnet_integration_subnet_id=""
-
-          # Existing App Insights lookup
-          export TF_VAR_enable_app_insights=true
-          export TF_VAR_app_insights_name="pse-grc-function"
-          export TF_VAR_app_insights_resource_group_name="rg-sub-p-ailz"
-
-          # Existing Function App Private Endpoint
-          export TF_VAR_enable_private_endpoint=true
-          export TF_VAR_private_endpoint_name="PE-GRC-FUNCTION"
-          export TF_VAR_private_service_connection_name="PE-GRC-FUNCTION"
-          export TF_VAR_private_dns_zone_group_name="default"
-          export TF_VAR_private_endpoint_subnet_id="/subscriptions/ce734819-c377-4b6b-b4ad-f406f8c85c2d/resourceGroups/rg-sub-p-ailz/providers/Microsoft.Network/virtualNetworks/vnet-sub-p-ailz/subnets/PrivateEndpointSubnet"
-          export TF_VAR_function_app_resource_id="/subscriptions/ce734819-c377-4b6b-b4ad-f406f8c85c2d/resourceGroups/rg-sub-p-ailz/providers/Microsoft.Web/Sites/pse-grc-function"
-          export TF_VAR_private_dns_zone_ids="[\"/subscriptions/a03e3bc7-4226-4e1c-a479-7db438c88052/resourceGroups/rg-hub-dns-azuconnectivity-flz-westus3/providers/Microsoft.Network/privateDnsZones/privatelink.azurewebsites.net\"]"
-
-          # Existing GRC Function storage account
-          export TF_VAR_grc_function_storage_account_name="psegrcfunctionstorage"
-          export TF_VAR_grc_function_storage_resource_group_name="rg-sub-p-ailz"
-          export TF_VAR_grc_function_storage_resource_id="/subscriptions/ce734819-c377-4b6b-b4ad-f406f8c85c2d/resourceGroups/rg-sub-p-ailz/providers/Microsoft.Storage/storageAccounts/psegrcfunctionstorage"
-          export TF_VAR_grc_function_storage_account_kind="StorageV2"
-          export TF_VAR_grc_function_storage_account_tier="Standard"
-          export TF_VAR_grc_function_storage_replication_type="LRS"
-          export TF_VAR_grc_function_storage_access_tier="Hot"
-          export TF_VAR_grc_function_storage_public_network_access_enabled=false
-          export TF_VAR_grc_function_storage_network_rule_bypass="[\"AzureServices\"]"
-          export TF_VAR_grc_function_storage_network_rule_default_action="Allow"
-          export TF_VAR_grc_function_storage_private_link_access_endpoint_resource_id="/subscriptions/ce734819-c377-4b6b-b4ad-f406f8c85c2d/providers/Microsoft.Security/datascanners/storageDataScanner"
-          export TF_VAR_grc_function_storage_private_link_access_endpoint_tenant_id="58e8b525-6212-4087-a0d0-fa755583444b"
-
-          # Existing GRC Function storage private endpoint
-          export TF_VAR_grc_function_storage_private_endpoint_name="PE-GRC-FUNCTION-STORAGE"
-          export TF_VAR_grc_function_storage_private_endpoint_resource_group_name="rg-sub-p-ailz"
-          export TF_VAR_grc_function_storage_private_endpoint_subnet_id="/subscriptions/ce734819-c377-4b6b-b4ad-f406f8c85c2d/resourceGroups/rg-sub-p-ailz/providers/Microsoft.Network/virtualNetworks/vnet-sub-p-ailz/subnets/PrivateEndpointSubnet"
-          export TF_VAR_grc_function_storage_private_endpoint_custom_nic_name="PE-GRC-FUNCTION-STORAGE-nic"
-          export TF_VAR_grc_function_storage_private_service_connection_name="PE-GRC-FUNCTION-STORAGE"
-          export TF_VAR_grc_function_storage_private_dns_zone_group_name="default"
-          export TF_VAR_grc_function_storage_private_dns_zone_ids="[\"/subscriptions/a03e3bc7-4226-4e1c-a479-7db438c88052/resourceGroups/rg-hub-dns-azuconnectivity-flz-westus3/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net\"]"
-
-          echo "Current Terraform state list:"
-          terraform state list | tee "$OUTDIR/terraform_state_list.txt"
-
-          echo "Parsing manifest and creating import blocks only for resources NOT already in state"
-
-          rm -f imports.auto.tf "$GENERATED_FILE"
-
-          HEADER="$(head -n 1 "$MANIFEST" | tr -d '\r')"
-          ROWS_FILE="$OUTDIR/manifest_rows.tsv"
-          rm -f "$ROWS_FILE"
-
-          if echo "$HEADER" | grep -q "tf_address"; then
-            echo "Detected CSV manifest with header"
-            awk -F',' '
-              NR > 1 {
-                gsub(/\r/, "", $0)
-                # columns: stack,tf_address,resource_type,resource_id,generate_config,notes
-                if ($2 != "" && $4 != "" && tolower($5) != "false") {
-                  print $2 "\t" $4
-                }
-              }
-            ' "$MANIFEST" > "$ROWS_FILE"
-          else
-            echo "Detected pipe-delimited manifest"
-            awk -F'|' '
-              {
-                gsub(/\r/, "", $0)
-                if ($1 != "" && $2 != "") {
-                  print $1 "\t" $2
-                }
-              }
-            ' "$MANIFEST" > "$ROWS_FILE"
-          fi
-
-          echo "Parsed manifest rows:"
-          cat "$ROWS_FILE" | tee "$OUTDIR/parsed_manifest_rows.txt"
-
-          if [ ! -s "$ROWS_FILE" ]; then
-            echo "ERROR: No valid manifest rows were parsed."
-            exit 2
-          fi
-
-          STATE_CHECK_FILE="$OUTDIR/state_check_summary.tsv"
-          echo -e "tf_address\tazure_exists\tstate_status\tnext_action" > "$STATE_CHECK_FILE"
-
-          while IFS=$'\t' read -r TF_ADDRESS RESOURCE_ID
-          do
-            echo "--------------------------------------------------"
-            echo "Terraform address: $TF_ADDRESS"
-            echo "Azure resource ID: $RESOURCE_ID"
-
-            SAFE_NAME=$(echo "$TF_ADDRESS" | tr '.[]/' '____')
-
-            echo "Validating Azure resource exists..."
-            az resource show \
-              --ids "$RESOURCE_ID" \
-              -o json > "$OUTDIR/${SAFE_NAME}.resource.json"
-
-            if terraform state list | grep -Fxq "$TF_ADDRESS"; then
-              echo "IN_STATE: $TF_ADDRESS. Skipping import config generation for this address."
-              echo -e "$TF_ADDRESS\ttrue\tIN_STATE\tSKIP_GENERATE_AND_IMPORT" >> "$STATE_CHECK_FILE"
-            else
-              echo "NOT_IN_STATE: $TF_ADDRESS. Adding import block."
-              echo -e "$TF_ADDRESS\ttrue\tNOT_IN_STATE\tGENERATE_IMPORT_CONFIG" >> "$STATE_CHECK_FILE"
-
-              {
-                echo "import {"
-                echo "  to = $TF_ADDRESS"
-                echo "  id = \"$RESOURCE_ID\""
-                echo "}"
-                echo ""
-              } >> imports.auto.tf
-            fi
-          done < "$ROWS_FILE"
-
-          echo "State check summary:"
-          cat "$STATE_CHECK_FILE" | tee "$OUTDIR/state_check_summary_printed.txt"
-
-          echo "Generated imports.auto.tf:"
-          if [ -f imports.auto.tf ]; then
-            cat imports.auto.tf | tee "$OUTDIR/imports.auto.tf"
-          else
-            echo "No imports.auto.tf generated."
-          fi
-
-          if [ ! -f imports.auto.tf ] || ! grep -q '^import {' imports.auto.tf; then
-            echo "RESULT: No import config needed. All manifest resources are already in state or no valid import blocks were generated."
-            exit 0
-          fi
-
-          echo "Running terraform plan with -generate-config-out=$GENERATED_FILE"
-          set +e
-          terraform plan \
-            -no-color \
-            -input=false \
-            -lock=false \
-            -generate-config-out="$GENERATED_FILE" \
-            -out=tfplan 2>&1 | tee "$OUTDIR/terraform_generate_config_plan.txt"
-          PLAN_EXIT=${PIPESTATUS[0]}
-          set -e
-
-          echo "$PLAN_EXIT" > "$OUTDIR/plan_exit_code.txt"
-          echo "Terraform generate-config plan exit code: $PLAN_EXIT"
-
-          if [ -f "$GENERATED_FILE" ]; then
-            echo "Generated Terraform starter config:"
-            cat "$GENERATED_FILE" | tee "$OUTDIR/$GENERATED_FILE"
-          else
-            echo "ERROR: Terraform did not produce $GENERATED_FILE"
-            exit "$PLAN_EXIT"
-          fi
-
-          echo "Generate config artifact contents:"
-          ls -la "$OUTDIR"
-
-          # For generate-config, a non-zero plan can still be useful if Terraform generated the file.
-          # We publish the generated file and review/clean it before import-plan.
-          exit 0
-
-    - task: PublishPipelineArtifact@1
-      displayName: 'Publish generated import config'
-      condition: always()
-      inputs:
-        targetPath: '$(Build.ArtifactStagingDirectory)/generate-import-config'
-        artifact: 'grc-function-app-generated-import-config'
+trigger: none
+pr: none
+
+parameters:
+  - name: action
+    displayName: Terraform action
+    type: string
+    default: plan
+    values:
+      - plan
+      - apply
+
+  - name: environment
+    displayName: Target environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - qa
+      - prod
+
+  - name: stackPath
+    displayName: Stack path
+    type: string
+    default: stacks/data-science-lz-core
+
+  - name: terraformVersion
+    displayName: Terraform version
+    type: string
+    default: 1.7.5
+
+variables:
+  - ${{ if eq(parameters.environment, 'dev') }}:
+      - group: DATA_SCIENCE_LZ_DEV
+
+  - ${{ if eq(parameters.environment, 'qa') }}:
+      - group: DATA_SCIENCE_LZ_QA
+
+  - ${{ if eq(parameters.environment, 'prod') }}:
+      - group: DATA_SCIENCE_LZ_PROD
+
+  - name: TF_IN_AUTOMATION
+    value: "true"
+
+pool:
+  name: azumanage-flz
+
+stages:
+  - stage: Validate
+    displayName: Validate
+    jobs:
+      - job: Validate
+        displayName: Terraform Validate
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - bash: |
+              set -euo pipefail
+
+              STACK_PATH="${{ parameters.stackPath }}"
+              TFVARS_FILE="${STACK_PATH}/tfvars/${{ parameters.environment }}.tfvars"
+
+              if [ ! -d "${STACK_PATH}" ]; then
+                echo "ERROR: Stack path does not exist: ${STACK_PATH}"
+                exit 1
+              fi
+
+              if [ ! -f "${TFVARS_FILE}" ]; then
+                echo "ERROR: Environment tfvars file does not exist: ${TFVARS_FILE}"
+                exit 1
+              fi
+
+              terraform fmt -check -diff -recursive "${STACK_PATH}"
+
+              cd "${STACK_PATH}"
+
+              terraform init \
+                -backend=false \
+                -input=false \
+                -no-color
+
+              terraform validate -no-color
+            displayName: Format and validate
+
+  - stage: Plan
+    displayName: Terraform Plan
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: Plan
+        displayName: Terraform Plan
+        steps:
+          - checkout: self
+
+          - task: TerraformInstaller@1
+            displayName: Install Terraform
+            inputs:
+              terraformVersion: ${{ parameters.terraformVersion }}
+
+          - task: AzureCLI@2
+            displayName: Terraform Init and Plan
+            inputs:
+              azureSubscription: "$(AZURE_SERVICE_CONNECTION)"
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+
+                : "${TF_BACKEND_SUBSCRIPTION_ID:?TF_BACKEND_SUBSCRIPTION_ID is required}"
+                : "${TF_BACKEND_RG:?TF_BACKEND_RG is required}"
+                : "${TF_BACKEND_STORAGE:?TF_BACKEND_STORAGE is required}"
+                : "${TF_BACKEND_CONTAINER:?TF_BACKEND_CONTAINER is required}"
+                : "${servicePrincipalId:?Service principal ID was not provided by the Azure service connection}"
+                : "${tenantId:?Tenant ID was not provided by the Azure service connection}"
+
+                STACK_PATH="${{ parameters.stackPath }}"
+                ENVIRONMENT="${{ parameters.environment }}"
+                TFVARS_FILE="tfvars/${ENVIRONMENT}.tfvars"
+                STATE_KEY="${ENVIRONMENT}/${STACK_PATH}/terraform.tfstate"
+
+                cd "${STACK_PATH}"
+
+                if [ ! -f "${TFVARS_FILE}" ]; then
+                  echo "ERROR: tfvars file not found: ${STACK_PATH}/${TFVARS_FILE}"
+                  exit 1
+                fi
+
+                export ARM_CLIENT_ID="${servicePrincipalId}"
+                export ARM_TENANT_ID="${tenantId}"
+                export ARM_SUBSCRIPTION_ID="${TF_BACKEND_SUBSCRIPTION_ID}"
+                export ARM_USE_CLI=false
+
+                if [ -n "${servicePrincipalKey:-}" ]; then
+                  export ARM_CLIENT_SECRET="${servicePrincipalKey}"
+                elif [ -n "${idToken:-}" ]; then
+                  export ARM_USE_OIDC=true
+                  export ARM_OIDC_TOKEN="${idToken}"
+                else
+                  echo "ERROR: Service connection did not provide a client secret or workload identity token."
+                  exit 1
+                fi
+
+                echo "Environment : ${ENVIRONMENT}"
+                echo "Stack       : ${STACK_PATH}"
+                echo "tfvars      : ${TFVARS_FILE}"
+                echo "State key   : ${STATE_KEY}"
+
+                terraform init \
+                  -reconfigure \
+                  -input=false \
+                  -no-color \
+                  -backend-config="subscription_id=${TF_BACKEND_SUBSCRIPTION_ID}" \
+                  -backend-config="resource_group_name=${TF_BACKEND_RG}" \
+                  -backend-config="storage_account_name=${TF_BACKEND_STORAGE}" \
+                  -backend-config="container_name=${TF_BACKEND_CONTAINER}" \
+                  -backend-config="key=${STATE_KEY}" \
+                  -backend-config="use_azuread_auth=true"
+
+                terraform plan \
+                  -input=false \
+                  -no-color \
+                  -var-file="${TFVARS_FILE}" \
+                  -out="$(Build.ArtifactStagingDirectory)/tfplan"
+
+                terraform show \
+                  -no-color \
+                  "$(Build.ArtifactStagingDirectory)/tfplan" \
+                  > "$(Build.ArtifactStagingDirectory)/tfplan.txt"
+
+                if [ -f ".terraform.lock.hcl" ]; then
+                  cp ".terraform.lock.hcl" "$(Build.ArtifactStagingDirectory)/"
+                fi
+
+          - publish: "$(Build.ArtifactStagingDirectory)"
+            artifact: tfplan
+            displayName: Publish Terraform Plan
+
+  - stage: Apply
+    displayName: Terraform Apply
+    dependsOn: Plan
+    condition: >
+      and(
+        succeeded(),
+        eq('${{ parameters.action }}', 'apply')
+      )
+    jobs:
+      - deployment: Apply
+        displayName: Apply Terraform Plan
+        environment: data-science-lz-${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: TerraformInstaller@1
+                  displayName: Install Terraform
+                  inputs:
+                    terraformVersion: ${{ parameters.terraformVersion }}
+
+                - download: current
+                  artifact: tfplan
+                  displayName: Download Terraform Plan
+
+                - task: AzureCLI@2
+                  displayName: Terraform Init and Apply
+                  inputs:
+                    azureSubscription: "$(AZURE_SERVICE_CONNECTION)"
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+
+                      : "${TF_BACKEND_SUBSCRIPTION_ID:?TF_BACKEND_SUBSCRIPTION_ID is required}"
+                      : "${TF_BACKEND_RG:?TF_BACKEND_RG is required}"
+                      : "${TF_BACKEND_STORAGE:?TF_BACKEND_STORAGE is required}"
+                      : "${TF_BACKEND_CONTAINER:?TF_BACKEND_CONTAINER is required}"
+                      : "${servicePrincipalId:?Service principal ID was not provided by the Azure service connection}"
+                      : "${tenantId:?Tenant ID was not provided by the Azure service connection}"
+
+                      STACK_PATH="${{ parameters.stackPath }}"
+                      ENVIRONMENT="${{ parameters.environment }}"
+                      STATE_KEY="${ENVIRONMENT}/${STACK_PATH}/terraform.tfstate"
+
+                      cd "${STACK_PATH}"
+
+                      export ARM_CLIENT_ID="${servicePrincipalId}"
+                      export ARM_TENANT_ID="${tenantId}"
+                      export ARM_SUBSCRIPTION_ID="${TF_BACKEND_SUBSCRIPTION_ID}"
+                      export ARM_USE_CLI=false
+
+                      if [ -n "${servicePrincipalKey:-}" ]; then
+                        export ARM_CLIENT_SECRET="${servicePrincipalKey}"
+                      elif [ -n "${idToken:-}" ]; then
+                        export ARM_USE_OIDC=true
+                        export ARM_OIDC_TOKEN="${idToken}"
+                      else
+                        echo "ERROR: Service connection did not provide a client secret or workload identity token."
+                        exit 1
+                      fi
+
+                      if [ -f "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" ]; then
+                        cp \
+                          "$(Pipeline.Workspace)/tfplan/.terraform.lock.hcl" \
+                          ".terraform.lock.hcl"
+                      fi
+
+                      echo "Environment : ${ENVIRONMENT}"
+                      echo "Stack       : ${STACK_PATH}"
+                      echo "State key   : ${STATE_KEY}"
+
+                      terraform init \
+                        -reconfigure \
+                        -input=false \
+                        -no-color \
+                        -backend-config="subscription_id=${TF_BACKEND_SUBSCRIPTION_ID}" \
+                        -backend-config="resource_group_name=${TF_BACKEND_RG}" \
+                        -backend-config="storage_account_name=${TF_BACKEND_STORAGE}" \
+                        -backend-config="container_name=${TF_BACKEND_CONTAINER}" \
+                        -backend-config="key=${STATE_KEY}" \
+                        -backend-config="use_azuread_auth=true"
+
+                      terraform apply \
+                        -input=false \
+                        -no-color \
+                        "$(Pipeline.Workspace)/tfplan/tfplan"
